@@ -750,6 +750,8 @@ let orderSummary = {};
 let orderDocs = {};
 let editDocId = null;
 let sampleFormOpen = false;
+let sampleDocIds = null; // Set of order_id yang punya dokumen PI Sample (untuk riwayat sample)
+let orderFinance = null; // ringkasan keuangan berbasis order (dari tabel transactions/orders)
 let orderLoading = false;
 let poCache = null;
 let suppliersCache = null;
@@ -1065,7 +1067,7 @@ async function deleteOrder(){
   const oid=openOrderId;
   const { error }=await sb.rpc('delete_order_cascade', { p_order: oid });
   if(error){ alert('Gagal hapus: '+error.message); return; }
-  orderSummary={}; poCache=null; billsCache=null; shipCache=null;
+  orderSummary={}; poCache=null; billsCache=null; shipCache=null; orderFinance=null;
   delete orderPayments[oid]; delete orderDocs[oid];
   ordersCache=null; orderView='list'; openOrderId=null; render();
 }
@@ -1121,7 +1123,7 @@ async function saveEditOrder(){
   const { error }=await sb.from('orders').update({ no_order:no, buyer_id, nilai_jual:nilai, nilai_sample:nilaiSample, tanggal_order:tgl, catatan:cat, status, items, po_masuk_no:poMasuk }).eq('id',openOrderId);
   if(error){ err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan perubahan'; return; }
   delete orderSummary[openOrderId];
-  ordersCache=null; orderView='card'; render();
+  ordersCache=null; orderView='card'; orderFinance=null; render();
 }
 
 async function resolveBuyerId(name){
@@ -1162,7 +1164,7 @@ async function saveNewOrder(){
     items, status, po_masuk_no:poMasuk, pic_sales:currentUserId
   });
   if(error){ err.textContent='Gagal simpan order: '+error.message; reset(); return; }
-  ordersCache=null; orderView='list'; render();
+  ordersCache=null; orderView='list'; orderFinance=null; render();
 }
 
 // ===== Sample + PI Sample (Langkah 6) =====
@@ -1251,32 +1253,47 @@ async function saveDoc(){
   if(editDocId){ res=await sb.from('order_docs').update({ jenis, nomor:no, tanggal:tgl, nilai, items }).eq('id',editDocId); }
   else { res=await sb.from('order_docs').insert({ order_id:openOrderId, jenis, nomor:no, tanggal:tgl, nilai, items, status:'terbit' }); }
   if(res.error){ err.textContent='Gagal simpan: '+res.error.message; btn.disabled=false; btn.textContent='Simpan'; return; }
-  sampleFormOpen=false; editDocId=null; delete orderDocs[openOrderId]; render();
+  sampleFormOpen=false; editDocId=null; delete orderDocs[openOrderId]; sampleDocIds=null; render();
 }
 async function deleteDoc(id){
   if(!confirm('Hapus dokumen ini?')) return;
   const { error }=await sb.from('order_docs').delete().eq('id',id);
   if(error){ alert('Gagal hapus: '+error.message); return; }
-  delete orderDocs[openOrderId]; render();
+  delete orderDocs[openOrderId]; sampleDocIds=null; render();
 }
-function viewSampleTab(){
-  if(ordersCache===null){ if(!orderLoading) loadOrders(); return `<div class="o-card">Memuat…</div>`; }
-  const list=ordersCache.filter(o=>o.status==='sample');
-  const rows=list.map(o=>`<tr class="o-row" data-open="${o.id}">
+async function loadSampleDocIds(){
+  const { data }=await sb.from('order_docs').select('order_id').eq('jenis','pi_sample');
+  sampleDocIds=new Set((data||[]).map(d=>d.order_id));
+  render();
+}
+function sampleRowsHTML(list){
+  return list.map(o=>`<tr class="o-row" data-open="${o.id}">
       <td style="font-weight:600;color:var(--tea-dark)">${o.no_order}</td>
       <td>${o.buyer_name}</td>
       <td style="color:var(--ink-soft);font-size:12px">${esc(itemSummary(o.items))||'—'}</td>
       <td style="text-align:right">${rp(o.nilai_sample)}</td>
+      <td>${statusBadge(o.status)}</td>
     </tr>`).join('');
+}
+function viewSampleTab(){
+  if(ordersCache===null){ if(!orderLoading) loadOrders(); return `<div class="o-card">Memuat…</div>`; }
+  if(sampleDocIds===null){ loadSampleDocIds(); return `<div class="o-card">Memuat data sample…</div>`; }
+  const hadSample=o=>o.status==='sample' || Number(o.nilai_sample)>0 || sampleDocIds.has(o.id);
+  const berjalan=ordersCache.filter(o=>o.status==='sample');
+  const riwayat=ordersCache.filter(o=>o.status!=='sample' && o.status!=='batal' && hadSample(o));
+  const tbl=(rows,empty)=>`<div class="o-card" style="padding:0;overflow:hidden">
+      <table class="o-table">
+        <thead><tr><th>No order</th><th>Buyer</th><th>Jenis teh</th><th style="text-align:right">Nilai sample</th><th>Status</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="5" class="o-empty">${empty}</td></tr>`}</tbody>
+      </table>
+    </div>`;
   return `<div class="o-wrap">
     <div class="o-head"><h2 class="o-title">Sample</h2></div>
-    <div class="o-card" style="padding:0;overflow:hidden">
-      <table class="o-table">
-        <thead><tr><th>No order</th><th>Buyer</th><th>Jenis teh</th><th style="text-align:right">Nilai sample</th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="4" class="o-empty">Tidak ada order di tahap sample.</td></tr>`}</tbody>
-      </table>
-    </div>
-    <p style="color:var(--ink-soft);font-size:12px;margin-top:10px">Klik order untuk terbitkan &amp; cetak <b>PI Sample</b>. (Order baru dengan status "Sample" muncul di sini.)</p>
+    <p style="margin:0 0 8px;font-weight:600;color:var(--ink)">Sample berjalan</p>
+    ${tbl(sampleRowsHTML(berjalan),'Tidak ada order di tahap sample.')}
+    <p style="margin:16px 0 8px;font-weight:600;color:var(--ink)">Riwayat sample <span style="font-weight:400;color:var(--ink-soft);font-size:12px">(sudah lanjut ke PO/berikutnya, tetap tersimpan)</span></p>
+    ${tbl(sampleRowsHTML(riwayat),'Belum ada riwayat sample.')}
+    <p style="color:var(--ink-soft);font-size:12px;margin-top:10px">Klik order untuk lihat / terbitkan / cetak <b>PI Sample</b> &amp; Surat Jalan Sample. Riwayat sample tidak hilang meski status sudah berubah.</p>
   </div>`;
 }
 function bindSampleTab(){
@@ -1757,13 +1774,13 @@ async function saveBill(){
   else if(ssel){ supplier_id=ssel; } else { err.textContent='Pilih supplier.'; reset(); return; }
   const { error }=await sb.from('supplier_bills').insert({ no_tagihan:no, order_id, supplier_id, nilai, items, tanggal_terima:terima, jatuh_tempo:tempo, jenis, status:'belum' });
   if(error){ err.textContent='Gagal simpan tagihan: '+error.message; reset(); return; }
-  orderSummary={}; billsCache=null; billView='list'; render();
+  orderSummary={}; billsCache=null; orderFinance=null; billView='list'; render();
 }
 async function deleteBill(id){
   if(!confirm('Hapus tagihan ini? Pembayaran yang tercatat ikut terhapus.')) return;
   const { error }=await sb.from('supplier_bills').delete().eq('id',id);
   if(error){ alert('Gagal hapus: '+error.message); return; }
-  orderSummary={}; billsCache=null; render();
+  orderSummary={}; billsCache=null; orderFinance=null; render();
 }
 function bindTagihan(){
   const nb=document.getElementById('billNew'); if(nb) nb.onclick=()=>{ billView='new'; render(); };
@@ -1832,7 +1849,7 @@ async function savePayment(){
   const paidNew=(Number(b.paid)||0)+jumlah;
   const status=paidNew>=(Number(b.nilai)||0)?'lunas':(paidNew>0?'sebagian':'belum');
   await sb.from('supplier_bills').update({status}).eq('id',b.id);
-  orderSummary={}; billsCache=null; payingBillId=null; render();
+  orderSummary={}; billsCache=null; orderFinance=null; payingBillId=null; render();
 }
 function billsSection(o){
   if(!canSeeCost()) return '';
@@ -1900,7 +1917,7 @@ async function deleteBuyerPayment(id){
   if(!confirm('Hapus pembayaran ini?')) return;
   const { error }=await sb.from('transactions').delete().eq('id',id);
   if(error){ alert('Gagal hapus: '+error.message); return; }
-  delete orderPayments[openOrderId]; delete orderSummary[openOrderId]; ordersCache=null; render();
+  delete orderPayments[openOrderId]; delete orderSummary[openOrderId]; ordersCache=null; orderFinance=null; render();
 }
 function bindBuyerPayForm(){
   const bpp=document.getElementById('bpPct'); if(!bpp) return;
@@ -1962,7 +1979,7 @@ async function saveEditBill(){
   const btn=document.getElementById('billSaveEdit'); btn.disabled=true; btn.textContent='Menyimpan…';
   const { error }=await sb.from('supplier_bills').update({ no_tagihan:no, order_id, supplier_id, nilai, items, tanggal_terima:terima, jatuh_tempo:tempo, jenis }).eq('id',editBillId);
   if(error){ err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan perubahan'; return; }
-  orderSummary={}; billsCache=null; billView='list'; editBillId=null; render();
+  orderSummary={}; billsCache=null; orderFinance=null; billView='list'; editBillId=null; render();
 }
 
 // ===== Pengiriman (buku kirim): jenis teh + supplier per item + resi =====
@@ -2433,6 +2450,53 @@ function viewRingkasan(){
   </div>`;
 }
 
+async function loadOrderFinance(){
+  const { data:tx }=await sb.from('transactions').select('arah,jenis,jumlah');
+  let masuk=0, bayarSupplier=0, biaya=0, modal=0;
+  (tx||[]).forEach(t=>{ const j=Number(t.jumlah)||0;
+    if(t.arah==='masuk' && (t.jenis==='dp'||t.jenis==='pelunasan')) masuk+=j;
+    else if(t.arah==='keluar' && t.jenis==='bayar_hutang') bayarSupplier+=j;
+    else if(t.arah==='keluar' && t.jenis==='biaya_usaha') biaya+=j;
+    else if(t.jenis==='modal') modal+=j;
+  });
+  const { data:os }=await sb.from('orders').select('nilai_jual,total_bayar_buyer,status');
+  let nilaiOrder=0, piutang=0, jumlahOrder=0;
+  (os||[]).forEach(o=>{ if(o.status==='batal') return; jumlahOrder++;
+    const nj=Number(o.nilai_jual)||0, by=Number(o.total_bayar_buyer)||0;
+    nilaiOrder+=nj; piutang+=Math.max(0,nj-by);
+  });
+  let hpp=0, laba=0;
+  const { data:vs }=await sb.from('v_order_summary').select('hpp,laba');
+  (vs||[]).forEach(v=>{ hpp+=Number(v.hpp)||0; laba+=Number(v.laba)||0; });
+  orderFinance={masuk,bayarSupplier,biaya,modal,nilaiOrder,piutang,jumlahOrder,hpp,laba};
+  render();
+}
+function orderFinanceSection(){
+  if(orderFinance===null){ loadOrderFinance(); return `<div class="card"><p class="empty" style="padding:14px">Memuat laporan dari order…</p></div>`; }
+  const f=orderFinance;
+  const kpi=(l,v,cls)=>`<div class="kpi"><div class="kpi-top"><span class="kpi-l">${l}</span></div><div class="kpi-v ${cls||''}" title="${rp(v)}">${rpKpi(v)}</div></div>`;
+  return `
+  <div class="sec-row" style="margin-top:22px"><div><h2 class="sec" style="margin:0;">Laporan Keuangan — dari Order</h2><p class="note" style="margin:3px 0 0;">Data terbaru dari modul Order (transaksi buyer, tagihan supplier, biaya termasuk sample gratis). Terpisah dari rekap bulanan di atas.</p></div></div>
+  <div class="kpi-grid">
+    ${kpi('Nilai Order','nilaiOrder' in f?f.nilaiOrder:0)}
+    ${kpi('Uang Masuk (DP+Pelunasan)',f.masuk)}
+    ${kpi('Piutang Buyer',f.piutang,f.piutang>0?'':'')}
+    ${kpi('Laba Order',f.laba,f.laba<0?'neg':'')}
+  </div>
+  <div class="card">
+    <table>
+      <tr><td class="txt">Jumlah order berjalan</td><td class="num">${f.jumlahOrder}</td></tr>
+      <tr><td class="txt">Nilai order (total penjualan)</td><td class="num">${rp(f.nilaiOrder)}</td></tr>
+      <tr><td class="txt">Uang masuk dari buyer (DP + pelunasan)</td><td class="num">${rp(f.masuk)}</td></tr>
+      <tr><td class="txt">Piutang buyer (belum dibayar)</td><td class="num ${f.piutang>0.5?'due':''}">${rp(f.piutang)}</td></tr>
+      <tr><td class="txt">HPP (dari tagihan pemenuhan PO)</td><td class="num">${rp(f.hpp)}</td></tr>
+      <tr><td class="txt">Kas keluar bayar supplier</td><td class="num">${rp(f.bayarSupplier)}</td></tr>
+      <tr><td class="txt">Biaya usaha dari order (termasuk sample gratis)</td><td class="num">${rp(f.biaya)}</td></tr>
+      <tr><td class="txt">Modal masuk (order)</td><td class="num">${rp(f.modal)}</td></tr>
+      <tr class="total"><td>Laba kotor order (nilai order − HPP)</td><td class="num ${f.laba<0?'neg':''}">${rp(f.laba)}</td></tr>
+    </table>
+  </div>`;
+}
 function viewReport(){
   const months=state.months.slice();
   let tp=0,tb=0,tpi=0,tn=0;
@@ -2463,7 +2527,8 @@ function viewReport(){
       ${rows||'<tr><td colspan="5" class="empty">Belum ada data bulan</td></tr>'}
       <tr class="total"><td>Total</td><td class="num">${rp(tp)}</td><td class="num">${rp(tb)}</td><td class="num">${rp(tpi)}</td><td class="num ${tn<0?'neg':''}">${rp(tn)}</td></tr>
     </table>
-  </div>`;
+  </div>
+  ${orderFinanceSection()}`;
 }
 
 function viewModal(){
@@ -2798,7 +2863,7 @@ async function saveSampleGratisCost(){
   const btn=document.getElementById('sgSave'); btn.disabled=true; btn.textContent='Menyimpan…';
   const { error }=await sb.from('transactions').insert({ tanggal:today(), arah:'keluar', jenis:'biaya_usaha', jumlah, order_id:oid, kategori:'Sample gratis / marketing', catatan:note||null });
   if(error){ if(err) err.textContent='Gagal: '+error.message; btn.disabled=false; btn.textContent='Catat sebagai Biaya usaha (marketing)'; return; }
-  delete orderSummary[oid];
+  delete orderSummary[oid]; orderFinance=null;
   document.getElementById('sgCost').value=''; document.getElementById('sgNote').value='';
   btn.disabled=false; btn.textContent='Catat sebagai Biaya usaha (marketing)';
   if(err){ err.style.color='#1D6B4F'; err.textContent='Tersimpan sebagai Biaya usaha ✓'; }
