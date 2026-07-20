@@ -925,10 +925,15 @@ function viewOrderNew(){
     .map(b=>`<option value="name::${encodeURIComponent(b.name)}">${esc(b.name)} (lama)</option>`).join('');
   const noSug='ORD-'+String((ordersCache?ordersCache.length:0)+1).padStart(3,'0');
   const stOpts=ORDER_STATUSES.map(s=>`<option value="${s[0]}" ${s[0]==='sample'?'selected':''}>${s[1]}</option>`).join('');
+  const sampleOrders=(ordersCache||[]).filter(o=>o.status==='sample');
+  const sampleOpts=sampleOrders.map(o=>`<option value="${o.id}">${esc(o.no_order)} · ${esc(o.buyer_name)}</option>`).join('');
   return `<div class="o-wrap" style="max-width:560px">
     <div class="o-head"><h2 class="o-title">Order baru</h2></div>
     <div class="o-card">
-      <label class="o-field">Buyer</label>
+      ${sampleOrders.length?`<label class="o-field" style="margin-top:0">Lanjutan dari sample? (opsional)</label>
+      <select class="o-input" id="oFromSample"><option value="">— Tidak, order baru —</option>${sampleOpts}</select>
+      <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 10px">Pilih nomor order <b>sample</b> yang sudah ada kalau order ini kelanjutannya (jadi PO). Buyer, no order &amp; nilai sample otomatis terisi &amp; tetap tersimpan — Anda tinggal isi Nilai jual (PO).</p>`:''}
+      <label class="o-field"${sampleOrders.length?'':' style="margin-top:0"'}>Buyer</label>
       <select class="o-input" id="oBuyer"><option value="">— pilih buyer —</option>${opts}${oldOpts}<option value="__new">+ Buyer baru…</option></select>
       <div id="oBuyerNewWrap" style="display:none"><label class="o-field">Nama buyer baru</label><input class="o-input" id="oBuyerNew" placeholder="mis. Wedrink"></div>
       <label class="o-field">Status awal</label>
@@ -1026,6 +1031,26 @@ function bindOrderModule(){
   } else if(orderView==='new'){
     const bsel=document.getElementById('oBuyer');
     if(bsel) bsel.onchange=()=>{ const w=document.getElementById('oBuyerNewWrap'); if(w) w.style.display = bsel.value==='__new'?'block':'none'; };
+    const fs=document.getElementById('oFromSample');
+    if(fs) fs.onchange=()=>{
+      const o=(ordersCache||[]).find(x=>x.id===fs.value);
+      const buyerEl=document.getElementById('oBuyer'), noEl=document.getElementById('oNo'),
+            nsEl=document.getElementById('oNilaiSample'), stEl=document.getElementById('oStatus0'),
+            nwEl=document.getElementById('oBuyerNewWrap'), cont=document.getElementById('itemRows');
+      if(o){
+        if(buyerEl){ buyerEl.value=o.buyer_id; buyerEl.disabled=true; }
+        if(nwEl) nwEl.style.display='none';
+        if(noEl){ noEl.value=o.no_order; noEl.readOnly=true; }
+        if(nsEl){ nsEl.value=Number(o.nilai_sample)||0; nsEl.readOnly=true; }
+        if(stEl){ stEl.value='po'; stEl.disabled=true; }
+        if(cont){ cont.innerHTML=((o.items&&o.items.length)?o.items:[{}]).map(it=>itemRowHTML(it)).join(''); bindItemEditor(); recalcItemTotal(); }
+      } else {
+        if(buyerEl){ buyerEl.disabled=false; buyerEl.value=''; }
+        if(noEl){ noEl.readOnly=false; }
+        if(nsEl){ nsEl.readOnly=false; nsEl.value=''; }
+        if(stEl){ stEl.disabled=false; stEl.value='sample'; }
+      }
+    };
     const sv=document.getElementById('oSave'); if(sv) sv.onclick=saveNewOrder;
     const cx=document.getElementById('oCancel'); if(cx) cx.onclick=()=>{ orderView='list'; render(); };
   } else if(orderView==='edit'){
@@ -1150,6 +1175,14 @@ async function saveNewOrder(){
   if(!no){ err.textContent='No order wajib diisi.'; return; }
   const btn=document.getElementById('oSave'); btn.disabled=true; btn.textContent='Menyimpan…';
   const reset=()=>{ btn.disabled=false; btn.textContent='Simpan order'; };
+  // Lanjutan dari sample → ubah order sample yang sama jadi PO (histori & nilai sample tetap)
+  const fromSampleId=(document.getElementById('oFromSample')||{}).value||'';
+  if(fromSampleId){
+    const { error }=await sb.from('orders').update({ status:'po', nilai_jual:nilai, po_masuk_no:poMasuk, items, catatan:cat }).eq('id',fromSampleId);
+    if(error){ err.textContent='Gagal simpan: '+error.message; reset(); return; }
+    delete orderSummary[fromSampleId]; ordersCache=null; orderView='list'; orderFinance=null; sampleDocIds=null; render();
+    return;
+  }
   let buyer_id=null;
   if(bsel==='__new'){
     if(!bnew){ err.textContent='Isi nama buyer baru.'; reset(); return; }
