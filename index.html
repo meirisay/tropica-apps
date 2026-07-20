@@ -766,6 +766,13 @@ let editBillId = null;
 let orderPayments = {};
 let buyerPayFormOpen = false;
 let pjOrderId = null;
+// ── Pengiriman (buku kirim) ──
+let shipCache = null;
+let shipView = 'list';    // 'list' | 'new' | 'edit'
+let shipLoading = false;
+let editShipId = null;
+const SHIP_JENIS = [['barang','Barang'],['sample','Sample'],['dokumen','Dokumen']];
+const SHIP_STATUS = [['dikirim','Dikirim'],['diterima','Diterima']];
 
 const ORDER_STATUSES = [
   ['sample','Sample'],['po','PO'],
@@ -786,24 +793,32 @@ function escAttr(s){ return esc(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').
 function itemsTotal(items){ return (items||[]).reduce((s,it)=>s+(Number(it.qty)||0)*(Number(it.harga)||0),0); }
 function computeItemTotals(items){ const dpp=itemsTotal(items); const ppn=Math.round(dpp*0.11); return {dpp, ppn, total:dpp+ppn}; }
 function itemSummary(items){ return (items||[]).map(i=>i.nama).filter(Boolean).join(', '); }
-function itemRowHTML(it){
+const ITEM_GRID='1fr 52px 74px 98px 26px';
+const ITEM_GRID_PACK='1fr 48px 62px 96px 84px 24px';
+function itemRowHTML(it, withPack){
   it=it||{};
   const uopts=UNITS.map(u=>`<option value="${u}" ${u===it.satuan?'selected':''}>${u}</option>`).join('');
-  return `<div class="item-row" style="display:grid;grid-template-columns:1fr 52px 74px 98px 26px;gap:5px;margin-bottom:6px;align-items:center">
+  const packCell = withPack ? `<input class="o-input it-packaging" placeholder="Packaging" value="${escAttr(it.packaging||'')}" style="padding:7px 6px">` : '';
+  return `<div class="item-row" style="display:grid;grid-template-columns:${withPack?ITEM_GRID_PACK:ITEM_GRID};gap:5px;margin-bottom:6px;align-items:center">
     <input class="o-input it-nama" placeholder="Jenis teh" value="${escAttr(it.nama||'')}" style="padding:7px 8px">
     <input class="o-input it-qty" type="number" inputmode="decimal" placeholder="Qty" value="${(it.qty!=null&&it.qty!=='')?it.qty:''}" style="padding:7px 6px">
     <select class="o-input it-satuan" style="padding:7px 4px"><option value="">Sat.</option>${uopts}</select>
+    ${packCell}
     <input class="o-input it-harga" type="number" inputmode="numeric" placeholder="Harga" value="${(it.harga!=null&&it.harga!=='')?it.harga:''}" style="padding:7px 8px">
     <button type="button" class="o-btn ghost it-del" style="padding:6px 4px;color:var(--danger);border-color:#E3B9B3">×</button>
   </div>`;
 }
-function itemEditorHTML(items){
+function itemEditorHTML(items, withPack){
   items=items||[];
   const t=computeItemTotals(items);
-  const rows=(items.length?items:[{}]).map(itemRowHTML).join('');
+  const grid=withPack?ITEM_GRID_PACK:ITEM_GRID;
+  const rows=(items.length?items:[{}]).map(it=>itemRowHTML(it, withPack)).join('');
+  const hdr = withPack
+    ? `<span>Item</span><span>Qty</span><span>Satuan</span><span>Packaging</span><span>Harga/sat</span><span></span>`
+    : `<span>Item</span><span>Qty</span><span>Satuan</span><span>Harga/sat</span><span></span>`;
   return `<label class="o-field">Rincian jenis teh</label>
-    <div style="display:grid;grid-template-columns:1fr 52px 74px 98px 26px;gap:5px;font-size:11px;color:var(--ink-soft);margin-bottom:4px"><span>Item</span><span>Qty</span><span>Satuan</span><span>Harga/sat</span><span></span></div>
-    <div id="itemRows">${rows}</div>
+    <div style="display:grid;grid-template-columns:${grid};gap:5px;font-size:11px;color:var(--ink-soft);margin-bottom:4px">${hdr}</div>
+    <div id="itemRows"${withPack?' data-pack="1"':''}>${rows}</div>
     <button type="button" class="o-btn ghost" id="itemAdd" style="padding:5px 12px;font-size:12px;margin-top:2px">+ Tambah item</button>
     <div style="text-align:right;margin-top:8px;font-size:13px;color:var(--ink-soft);line-height:1.9">
       Subtotal: <b id="itemDPP" style="color:var(--ink)">${rp(t.dpp)}</b><br>
@@ -818,7 +833,9 @@ function collectItems(){
     const qty=Number(r.querySelector('.it-qty').value)||0;
     const satuan=r.querySelector('.it-satuan').value;
     const harga=Number(r.querySelector('.it-harga').value)||0;
-    if(nama||qty||harga) out.push({nama, qty, satuan, harga});
+    const packEl=r.querySelector('.it-packaging');
+    const pack=packEl?packEl.value.trim():'';
+    if(nama||qty||harga||pack){ const rec={nama, qty, satuan, harga}; if(packEl) rec.packaging=pack; out.push(rec); }
   });
   return out;
 }
@@ -832,8 +849,9 @@ function bindItemRowEvents(){
 }
 function bindItemEditor(){
   const cont=document.getElementById('itemRows'); if(!cont) return;
+  const withPack=cont.dataset.pack==='1';
   const add=document.getElementById('itemAdd');
-  if(add) add.onclick=()=>{ cont.insertAdjacentHTML('beforeend', itemRowHTML({})); bindItemRowEvents(); };
+  if(add) add.onclick=()=>{ cont.insertAdjacentHTML('beforeend', itemRowHTML({}, withPack)); bindItemRowEvents(); };
   bindItemRowEvents();
 }
 function itemsDisplayCard(title, items){
@@ -853,7 +871,7 @@ async function loadOrders(){
   const { data:bs } = await sb.from('buyers').select('id,nama').order('nama');
   buyersCache = bs||[];
   const { data:os, error } = await sb.from('orders')
-    .select('id,no_order,status,nilai_jual,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,po_masuk_no')
+    .select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,po_masuk_no')
     .order('created_at',{ascending:false});
   if(error) console.error('load orders', error);
   const bmap={}; buyersCache.forEach(b=>bmap[b.id]=b.nama);
@@ -918,6 +936,9 @@ function viewOrderNew(){
       <input class="o-input" id="oNo" value="${noSug}">
       <label class="o-field">No PO buyer (isi kalau sudah PO)</label>
       <input class="o-input" id="oPoMasuk" placeholder="mis. PO-WD-0342">
+      <label class="o-field">Nilai sample (opsional)</label>
+      <input class="o-input" id="oNilaiSample" type="number" inputmode="numeric" placeholder="nilai penawaran saat tahap sample" value="">
+      <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Nilai tahap sample. Tersimpan terpisah — tidak tertimpa oleh nilai PO.</p>
       ${itemEditorHTML([])}
       <label class="o-field">Nilai jual (PO buyer)</label>
       <input class="o-input" id="oNilai" type="number" inputmode="numeric" placeholder="otomatis dari total item" value="">
@@ -981,7 +1002,8 @@ function viewOrderCard(){
       <p style="margin:0 0 14px;color:var(--ink-soft);font-size:12.5px">Tanggal order ${fmtLong(o.tanggal_order)}${(isPO&&o.po_masuk_no)?` · <b style="color:var(--tea-dark)">PO buyer: ${esc(o.po_masuk_no)}</b>`:''}${o.catatan?(' · '+esc(o.catatan)):''}</p>
       <div class="o-pipe">${pipe}</div>
       <table class="o-kv">
-        <tr><td>Nilai ${isPO?'jual (PO)':'sample'}</td><td>${rp(o.nilai_jual)}</td></tr>
+        ${(Number(o.nilai_sample)>0||o.status==='sample')?`<tr><td>Nilai sample</td><td>${rp(o.nilai_sample)}</td></tr>`:''}
+        ${isPO?`<tr><td>Nilai jual (PO)</td><td>${rp(o.nilai_jual)}</td></tr>`:''}
         <tr><td>Status bayar</td><td style="color:${nilai>0&&bayar>=nilai?'#1D6B4F':(bayar>0?'#8A5B0E':'var(--ink-soft)')}">${statusBayar}</td></tr>
         ${costCards}
       </table>
@@ -1039,9 +1061,12 @@ function bindOrderModule(){
 async function deleteOrder(){
   const o=ordersCache.find(x=>x.id===openOrderId);
   if(!o) return;
-  if(!confirm('Hapus order '+o.no_order+' ('+o.buyer_name+')? Tindakan ini tidak bisa dibatalkan.')) return;
-  const { error }=await sb.from('orders').delete().eq('id',openOrderId);
-  if(error){ alert('Gagal hapus: '+error.message+'\n(Order yang sudah punya PO/tagihan/pembayaran tidak bisa dihapus.)'); return; }
+  if(!confirm('Hapus order '+o.no_order+' ('+o.buyer_name+')?\n\nSEMUA yang menempel ikut terhapus:\n• PO keluar\n• tagihan supplier + pembayarannya\n• pengiriman\n• transaksi buyer (DP/pelunasan)\n\nTindakan ini tidak bisa dibatalkan.')) return;
+  const oid=openOrderId;
+  const { error }=await sb.rpc('delete_order_cascade', { p_order: oid });
+  if(error){ alert('Gagal hapus: '+error.message); return; }
+  orderSummary={}; poCache=null; billsCache=null; shipCache=null;
+  delete orderPayments[oid]; delete orderDocs[oid];
   ordersCache=null; orderView='list'; openOrderId=null; render();
 }
 function viewOrderEdit(){
@@ -1060,6 +1085,9 @@ function viewOrderEdit(){
       <input class="o-input" id="oNo" value="${escAttr(o.no_order)}">
       <label class="o-field">No PO buyer (isi kalau sudah PO)</label>
       <input class="o-input" id="oPoMasuk" value="${escAttr(o.po_masuk_no||'')}">
+      <label class="o-field">Nilai sample (opsional)</label>
+      <input class="o-input" id="oNilaiSample" type="number" value="${Number(o.nilai_sample)||0}">
+      <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Nilai tahap sample. Tersimpan terpisah — tidak tertimpa oleh nilai PO.</p>
       ${itemEditorHTML(o.items)}
       <label class="o-field">Nilai jual (PO buyer)</label>
       <input class="o-input" id="oNilai" type="number" value="${Number(o.nilai_jual)||0}">
@@ -1082,6 +1110,7 @@ async function saveEditOrder(){
   const no=document.getElementById('oNo').value.trim();
   const items=collectItems();
   const nilai=items.length ? computeItemTotals(items).total : (Number(document.getElementById('oNilai').value)||0);
+  const nilaiSample=Number((document.getElementById('oNilaiSample')||{}).value)||0;
   const tgl=document.getElementById('oTgl').value||today();
   const cat=document.getElementById('oCatatan').value.trim();
   const status=(document.getElementById('oStatus0')||{}).value||'sample';
@@ -1089,7 +1118,7 @@ async function saveEditOrder(){
   if(!no){ err.textContent='No order wajib diisi.'; return; }
   if(!buyer_id){ err.textContent='Pilih buyer.'; return; }
   const btn=document.getElementById('oSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('orders').update({ no_order:no, buyer_id, nilai_jual:nilai, tanggal_order:tgl, catatan:cat, status, items, po_masuk_no:poMasuk }).eq('id',openOrderId);
+  const { error }=await sb.from('orders').update({ no_order:no, buyer_id, nilai_jual:nilai, nilai_sample:nilaiSample, tanggal_order:tgl, catatan:cat, status, items, po_masuk_no:poMasuk }).eq('id',openOrderId);
   if(error){ err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan perubahan'; return; }
   delete orderSummary[openOrderId];
   ordersCache=null; orderView='card'; render();
@@ -1111,6 +1140,7 @@ async function saveNewOrder(){
   const no=document.getElementById('oNo').value.trim();
   const items=collectItems();
   const nilai=items.length ? computeItemTotals(items).total : (Number(document.getElementById('oNilai').value)||0);
+  const nilaiSample=Number((document.getElementById('oNilaiSample')||{}).value)||0;
   const tgl=document.getElementById('oTgl').value||today();
   const cat=document.getElementById('oCatatan').value.trim();
   const status=(document.getElementById('oStatus0')||{}).value||'sample';
@@ -1128,7 +1158,7 @@ async function saveNewOrder(){
   } else if(bsel){ buyer_id=bsel; }
   else { err.textContent='Pilih buyer dulu.'; reset(); return; }
   const { error }=await sb.from('orders').insert({
-    no_order:no, buyer_id, nilai_jual:nilai, tanggal_order:tgl, catatan:cat,
+    no_order:no, buyer_id, nilai_jual:nilai, nilai_sample:nilaiSample, tanggal_order:tgl, catatan:cat,
     items, status, po_masuk_no:poMasuk, pic_sales:currentUserId
   });
   if(error){ err.textContent='Gagal simpan order: '+error.message; reset(); return; }
@@ -1174,7 +1204,7 @@ function docsSection(o){
       <td style="font-family:'IBM Plex Mono',monospace">${esc(d.nomor||'-')}${d.items&&d.items.length?`<div style="font-family:'Inter',sans-serif;font-size:11px;color:var(--ink-soft);font-weight:400">${esc(itemSummary(d.items))}</div>`:''}</td>
       <td>${fmtLong(d.tanggal)}</td>
       <td style="text-align:right">${rp(d.nilai)}</td>
-      ${canWrite?`<td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-editdoc="${d.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-deldoc="${d.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>`:'<td></td>'}
+      <td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-printdoc="${d.id}" style="padding:4px 9px">Cetak</button>${canWrite?` <button class="o-btn ghost" data-editdoc="${d.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-deldoc="${d.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:''}</td>
     </tr>`).join('');
   let form='';
   if(sampleFormOpen){
@@ -1235,22 +1265,22 @@ function viewSampleTab(){
   const rows=list.map(o=>`<tr class="o-row" data-open="${o.id}">
       <td style="font-weight:600;color:var(--tea-dark)">${o.no_order}</td>
       <td>${o.buyer_name}</td>
-      <td>${statusBadge(o.status)}</td>
-      <td style="text-align:right">${rp(o.nilai_jual)}</td>
+      <td style="color:var(--ink-soft);font-size:12px">${esc(itemSummary(o.items))||'—'}</td>
+      <td style="text-align:right">${rp(o.nilai_sample)}</td>
     </tr>`).join('');
   return `<div class="o-wrap">
     <div class="o-head"><h2 class="o-title">Sample</h2></div>
     <div class="o-card" style="padding:0;overflow:hidden">
       <table class="o-table">
-        <thead><tr><th>No order</th><th>Buyer</th><th>Status</th><th style="text-align:right">Nilai</th></tr></thead>
+        <thead><tr><th>No order</th><th>Buyer</th><th>Jenis teh</th><th style="text-align:right">Nilai sample</th></tr></thead>
         <tbody>${rows||`<tr><td colspan="4" class="o-empty">Tidak ada order di tahap sample.</td></tr>`}</tbody>
       </table>
     </div>
-    <p style="color:var(--ink-soft);font-size:12px;margin-top:10px">Klik order untuk membuka kartu &amp; terbitkan PI Sample.</p>
+    <p style="color:var(--ink-soft);font-size:12px;margin-top:10px">Klik order untuk terbitkan &amp; cetak <b>PI Sample</b>. (Order baru dengan status "Sample" muncul di sini.)</p>
   </div>`;
 }
 function bindSampleTab(){
-  document.querySelectorAll('.o-row').forEach(r=>r.onclick=()=>{ openOrderId=r.dataset.open; orderView='card'; sampleFormOpen=false; poFormOpen=false; activeTab='daftar_order'; render(); });
+  document.querySelectorAll('.o-row').forEach(r=>r.onclick=()=>{ openOrderId=r.dataset.open; pjOrderId=r.dataset.open; activeTab='doc_jual'; sampleFormOpen=false; poFormOpen=false; buyerPayFormOpen=false; render(); });
 }
 
 // ===== PO keluar + Supplier (Langkah 7) =====
@@ -1267,11 +1297,11 @@ async function loadPOs(){
   if(suppliersCache===null){ const { data }=await sb.from('suppliers').select('id,nama').order('nama'); suppliersCache=data||[]; }
   if(ordersCache===null){
     const { data:bs }=await sb.from('buyers').select('id,nama').order('nama'); buyersCache=bs||[];
-    const { data:os }=await sb.from('orders').select('id,no_order,status,nilai_jual,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,po_masuk_no').order('created_at',{ascending:false});
+    const { data:os }=await sb.from('orders').select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,po_masuk_no').order('created_at',{ascending:false});
     const bmap={}; (buyersCache||[]).forEach(b=>bmap[b.id]=b.nama);
     ordersCache=(os||[]).map(o=>({...o, buyer_name:bmap[o.buyer_id]||'—'}));
   }
-  const { data:ps }=await sb.from('purchase_orders').select('id,no_po,order_id,supplier_id,tanggal,total,status,items,jatuh_tempo,bayar_status,suppliers(nama),orders(no_order)').order('created_at',{ascending:false});
+  const { data:ps }=await sb.from('purchase_orders').select('id,no_po,order_id,supplier_id,tanggal,total,status,items,jatuh_tempo,deadline_kirim,bayar_status,suppliers(nama),orders(no_order)').order('created_at',{ascending:false});
   poCache=(ps||[]).map(p=>({...p, supplier_name:p.suppliers?p.suppliers.nama:'—', order_no:p.orders?p.orders.no_order:'—'}));
   poLoading=false;
   render();
@@ -1291,11 +1321,14 @@ function poFormFields(items){
       <div><label class="o-field">No PO</label><input class="o-input" id="poNo" value="PO-OUT-${seq}"></div>
       <div><label class="o-field">Tanggal</label><input class="o-input" id="poTgl" type="date" value="${today()}"></div>
     </div>
-    ${itemEditorHTML(items||[])}
+    ${itemEditorHTML(items||[], true)}
     <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
       <div><label class="o-field">Total pembelian (Rp)</label><input class="o-input" id="poTotal" type="number" inputmode="numeric" placeholder="otomatis dari total item" value=""></div>
-      <div><label class="o-field">Jatuh tempo bayar</label><input class="o-input" id="poTempo" type="date"></div>
+      <div><label class="o-field">Jatuh tempo bayar (internal)</label><input class="o-input" id="poTempo" type="date"></div>
     </div>
+    <label class="o-field">Deadline pengiriman (batas supplier kirim barang)</label>
+    <input class="o-input" id="poDeadline" type="date">
+    <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Ini yang tampil di PO yang dicetak &amp; dikirim ke supplier — beda dari jatuh tempo bayar.</p>
     <label class="o-field">Status bayar</label>
     <select class="o-input" id="poStatus">${PO_STATUS.map(s=>`<option value="${s[0]}" ${s[0]==='belum'?'selected':''}>${s[1]}</option>`).join('')}</select>
     <div id="poErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:8px"></div>
@@ -1322,15 +1355,18 @@ function viewPOEdit(){
       <select class="o-input" id="poOrder"><option value="">—</option>${oopts}</select>
       <label class="o-field">Supplier</label>
       <select class="o-input" id="poSupplier">${sopts}</select>
-      ${itemEditorHTML(p.items)}
+      ${itemEditorHTML(p.items, true)}
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
         <div><label class="o-field">No PO</label><input class="o-input" id="poNo" value="${escAttr(p.no_po||'')}"></div>
         <div><label class="o-field">Tanggal</label><input class="o-input" id="poTgl" type="date" value="${p.tanggal||today()}"></div>
       </div>
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
         <div><label class="o-field">Total (Rp)</label><input class="o-input" id="poTotal" type="number" value="${Number(p.total)||0}"></div>
-        <div><label class="o-field">Jatuh tempo bayar</label><input class="o-input" id="poTempo" type="date" value="${p.jatuh_tempo||''}"></div>
+        <div><label class="o-field">Jatuh tempo bayar (internal)</label><input class="o-input" id="poTempo" type="date" value="${p.jatuh_tempo||''}"></div>
       </div>
+      <label class="o-field">Deadline pengiriman (batas supplier kirim barang)</label>
+      <input class="o-input" id="poDeadline" type="date" value="${p.deadline_kirim||''}">
+      <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Tampil di PO yang dicetak ke supplier — beda dari jatuh tempo bayar.</p>
       <label class="o-field">Status bayar</label>
       <select class="o-input" id="poStatus">${PO_STATUS.map(s=>`<option value="${s[0]}" ${s[0]===(p.bayar_status||'belum')?'selected':''}>${s[1]}</option>`).join('')}</select>
       <div id="poErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:8px"></div>
@@ -1348,10 +1384,11 @@ async function saveEditPO(){
   const tgl=document.getElementById('poTgl').value||today();
   const bayarStatus=document.getElementById('poStatus').value||'belum';
   const tempo=document.getElementById('poTempo')?(document.getElementById('poTempo').value||null):null;
+  const deadline=document.getElementById('poDeadline')?(document.getElementById('poDeadline').value||null):null;
   if(!supplier_id){ err.textContent='Pilih supplier.'; return; }
   if(!no){ err.textContent='No PO wajib diisi.'; return; }
   const btn=document.getElementById('poSaveEdit'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('purchase_orders').update({ no_po:no, order_id, supplier_id, tanggal:tgl, total, items, jatuh_tempo:tempo, bayar_status:bayarStatus }).eq('id',editPOId);
+  const { error }=await sb.from('purchase_orders').update({ no_po:no, order_id, supplier_id, tanggal:tgl, total, items, jatuh_tempo:tempo, deadline_kirim:deadline, bayar_status:bayarStatus }).eq('id',editPOId);
   if(error){ err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan perubahan'; return; }
   orderSummary={}; poCache=null; poView='list'; editPOId=null; render();
 }
@@ -1363,7 +1400,7 @@ function viewPOList(){
       <td style="text-align:right">${rp(p.total)}</td>
       <td>${poTempoCell(p)}</td>
       <td>${poStatusSelect(p)}</td>
-      <td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-editpo="${p.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delpo="${p.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>
+      <td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-printpo="${p.id}" style="padding:4px 9px">Cetak</button> <button class="o-btn ghost" data-editpo="${p.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delpo="${p.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>
     </tr>`).join('');
   return `<div class="o-wrap">
     <div class="o-head"><h2 class="o-title">PO keluar (ke supplier)</h2><button class="o-btn" id="poNew">+ PO keluar</button></div>
@@ -1395,7 +1432,7 @@ function poSection(o){
       <td>${esc(p.supplier_name)}</td>
       <td style="text-align:right">${rp(p.total)}</td>
       <td>${poStatusSelect(p)}</td>
-      <td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-editpo="${p.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delpo="${p.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>
+      <td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-printpo="${p.id}" style="padding:4px 9px">Cetak</button> <button class="o-btn ghost" data-editpo="${p.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delpo="${p.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>
     </tr>`).join('');
   const form = poFormOpen ? `<div style="border-top:1px solid var(--paper-line);margin-top:12px;padding-top:12px">${poFormFields(o.items)}</div>` : `<button class="o-btn ghost" id="poAddCard" style="margin-top:6px">+ PO keluar</button>`;
   return `<div class="o-card">
@@ -1417,6 +1454,7 @@ async function savePO(){
   const total=items.length ? computeItemTotals(items).total : (Number(document.getElementById('poTotal').value)||0);
   const bayarStatus=(document.getElementById('poStatus')||{}).value||'belum';
   const tempo=document.getElementById('poTempo')?(document.getElementById('poTempo').value||null):null;
+  const deadline=document.getElementById('poDeadline')?(document.getElementById('poDeadline').value||null):null;
   if(!order_id){ err.textContent='Pilih order dulu.'; return; }
   if(!no){ err.textContent='No PO wajib diisi.'; return; }
   const btn=document.getElementById('poSave'); btn.disabled=true; btn.textContent='Menyimpan…';
@@ -1427,7 +1465,7 @@ async function savePO(){
     const r=await resolveSupplierId(snew); if(r.error){ err.textContent='Gagal simpan supplier: '+r.error; reset(); return; } supplier_id=r.id;
   } else if(ssel){ supplier_id=ssel; }
   else { err.textContent='Pilih supplier.'; reset(); return; }
-  const { error }=await sb.from('purchase_orders').insert({ no_po:no, order_id, supplier_id, tanggal:tgl, total, items, jatuh_tempo:tempo, bayar_status:bayarStatus });
+  const { error }=await sb.from('purchase_orders').insert({ no_po:no, order_id, supplier_id, tanggal:tgl, total, items, jatuh_tempo:tempo, deadline_kirim:deadline, bayar_status:bayarStatus });
   if(error){ err.textContent='Gagal simpan PO: '+error.message; reset(); return; }
   poCache=null;
   if(orderSel) poView='list'; else poFormOpen=false;
@@ -1448,6 +1486,7 @@ function bindPOCommon(inCard){
   const ce=document.getElementById('poCancelEdit'); if(ce) ce.onclick=()=>{ poView='list'; editPOId=null; render(); };
   document.querySelectorAll('[data-editpo]').forEach(b=>b.onclick=()=>{ editPOId=b.dataset.editpo; poView='edit'; activeTab='po_keluar'; render(); });
   document.querySelectorAll('[data-delpo]').forEach(b=>b.onclick=()=>deletePO(b.dataset.delpo));
+  document.querySelectorAll('[data-printpo]').forEach(b=>b.onclick=()=>openPOPrint(b.dataset.printpo));
   document.querySelectorAll('[data-postatus]').forEach(sel=>sel.onchange=async()=>{
     const { error }=await sb.from('purchase_orders').update({bayar_status:sel.value}).eq('id',sel.dataset.postatus);
     if(error){ alert('Gagal ubah status: '+error.message); return; }
@@ -1458,6 +1497,155 @@ function bindPOCommon(inCard){
 function bindPOTab(){
   const nb=document.getElementById('poNew'); if(nb) nb.onclick=()=>{ poView='new'; render(); };
   bindPOCommon(false);
+}
+// ── Cetak PO keluar (ke supplier) — mengikuti template PO buatan user ──
+const PO_TERMS=[
+  'Pengiriman barang dilakukan maksimal 25 (dua puluh lima) hari kalender sejak tanggal PO diterbitkan.',
+  'Pengiriman barang dapat dilakukan maksimal 2 (dua) kali (parsial).',
+  'Kualitas produk harus sesuai dengan sampel yang telah disepakati.',
+  'Packaging menggunakan carton ukuran 50 x 50 x 45 atau paper sack berwarna coklat polos tanpa tulisan.'
+];
+function openPOPrint(poId){
+  const p=(poCache||[]).find(x=>x.id===poId); if(!p) return;
+  const s=state.seller||{};
+  const items=p.items||[];
+  const t=computeItemTotals(items);
+  const sub = items.length ? t.dpp : (Number(p.total)||0);
+  const ppn = items.length ? t.ppn : 0;
+  const grand = items.length ? t.total : (Number(p.total)||0);
+  const itemRows=items.map((r,i)=>{
+    const qtyTxt=`${esc(String(r.qty!=null?r.qty:''))} ${esc(r.satuan||'')}`.trim();
+    return `<tr><td class="c">${i+1}</td><td class="t">${esc(r.nama)}</td><td class="c">${qtyTxt||'-'}</td><td class="c">${esc(r.packaging||'-')}</td><td class="r">Rp ${(Number(r.harga)||0).toLocaleString('id-ID')}</td></tr>`;
+  }).join('');
+  const blankRows=Array.from({length:Math.max(0,3-items.length)}).map(()=>`<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td></tr>`).join('');
+  const buyerName=esc(s.brand)||'TROPICA FARM';
+  let ov=document.getElementById('poPrintOverlay'); if(ov) ov.remove();
+  ov=document.createElement('div'); ov.id='poPrintOverlay';
+  ov.innerHTML=`<div class="overlay"><div class="doc-wrap">
+    <div class="doc-bar no-print">
+      <button class="print" data-poprint="1">Print / Simpan PDF</button>
+      <button class="close" data-poclose="1">Tutup</button>
+    </div>
+    <div id="printArea"><div class="inv">
+      <div class="inv-head">
+        <div class="inv-brand">${invLogo()}<div class="txt"><div class="b">${esc(s.brand)||'TROPICA FARM'}</div><div class="l">${esc(s.legal)}</div><div class="a">${esc(s.alamat)}</div></div></div>
+      </div>
+      <div class="inv-rule"></div>
+      <div class="inv-title">PURCHASE ORDER</div>
+      <div class="inv-info">
+        <div class="left">
+          <div class="r"><span class="k">PO Number</span><span>${esc(p.no_po||'-')}</span></div>
+          <div class="r"><span class="k">Order Date</span><span>${fmtLong(p.tanggal)}</span></div>
+          <div class="r"><span class="k">From (Buyer)</span><span>${buyerName}</span></div>
+          <div class="r"><span class="k">To (Seller)</span><span>${esc(p.supplier_name||'—')}</span></div>
+          <div class="r"><span class="k">Batas Kirim Barang</span><span>${p.deadline_kirim?fmtLong(p.deadline_kirim):'-'}</span></div>
+          ${p.order_no?`<div class="r"><span class="k">Ref. Order</span><span>${esc(p.order_no)}</span></div>`:''}
+        </div>
+      </div>
+      <table class="inv-tbl">
+        <tr><th style="width:40px;">No.</th><th>Description</th><th style="width:88px;">Quantity</th><th style="width:130px;">Packaging</th><th style="width:120px;">Unit Price</th></tr>
+        ${itemRows||''}${blankRows}
+        <tr class="sum"><td colspan="4" class="lbl">Total</td><td class="r">Rp ${sub.toLocaleString('id-ID')}</td></tr>
+        <tr class="sum"><td colspan="4" class="lbl">PPN 11%</td><td class="r">Rp ${ppn.toLocaleString('id-ID')}</td></tr>
+        <tr class="grand"><td colspan="4" class="lbl">Grand Total</td><td class="r">Rp ${grand.toLocaleString('id-ID')}</td></tr>
+      </table>
+      <div class="inv-sec-h">TERMS &amp; CONDITIONS</div>
+      <div class="inv-notes"><ol>${PO_TERMS.map(x=>`<li>${esc(x)}</li>`).join('')}</ol></div>
+      <div class="inv-sign">
+        <div class="city">Authorized By</div>
+        <div class="sp"></div>
+        <div>(__________________________)</div>
+        <div class="nm">${esc(s.signer)||esc(s.brand)||''}</div>
+      </div>
+    </div></div>
+  </div></div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('[data-poclose]').onclick=()=>ov.remove();
+  ov.querySelector('[data-poprint]').onclick=()=>window.print();
+  const back=ov.querySelector('.overlay'); back.onclick=(e)=>{ if(e.target===back) ov.remove(); };
+}
+// ── Cetak PI / Invoice dari Order (data ditarik dari order + dokumen order_docs) ──
+function docPrintMeta(jenis){
+  if(jenis==='invoice') return {title:'INVOICE', banner:'FINAL PAYMENT', due:'AMOUNT DUE'};
+  if(jenis==='pi_sample') return {title:'PROFORMA INVOICE', banner:'SAMPLE', due:'AMOUNT DUE'};
+  return {title:'PROFORMA INVOICE', banner:'DOWN PAYMENT', due:'AMOUNT DUE — DOWN PAYMENT'};
+}
+function openDocPrint(docId){
+  const oid=openOrderId||pjOrderId;
+  const docs=orderDocs[oid]||[];
+  const d=docs.find(x=>x.id===docId); if(!d) return;
+  const o=(ordersCache||[]).find(x=>x.id===oid)||{};
+  const s=state.seller||{};
+  const meta=docPrintMeta(d.jenis);
+  const items=(d.items&&d.items.length)?d.items:(o.items||[]);
+  const t=computeItemTotals(items);
+  const hasItems=items.length>0;
+  const sub = hasItems ? t.dpp : (Number(d.nilai)||0);
+  const ppn = hasItems ? t.ppn : 0;
+  const total = hasItems ? t.total : (Number(d.nilai)||0);
+  const due = Number(d.nilai)||total;
+  const itemRows=items.map((r,i)=>`<tr><td class="c">${i+1}</td><td class="t">${esc(r.nama)}</td><td class="c">${esc(String(r.qty!=null?r.qty:''))} ${esc(r.satuan||'')}</td><td class="r">${(Number(r.harga)||0).toLocaleString('id-ID')}</td><td class="r">${((Number(r.qty)||0)*(Number(r.harga)||0)).toLocaleString('id-ID')}</td></tr>`).join('');
+  const blankRows=Array.from({length:Math.max(0,3-items.length)}).map(()=>`<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td></tr>`).join('');
+  let ov=document.getElementById('poPrintOverlay'); if(ov) ov.remove();
+  ov=document.createElement('div'); ov.id='poPrintOverlay';
+  ov.innerHTML=`<div class="overlay"><div class="doc-wrap">
+    <div class="doc-bar no-print">
+      <button class="print" data-poprint="1">Print / Simpan PDF</button>
+      <button class="close" data-poclose="1">Tutup</button>
+    </div>
+    <div id="printArea"><div class="inv">
+      <div class="inv-head">
+        <div class="inv-brand">${invLogo()}<div class="txt"><div class="b">${esc(s.brand)||'TROPICA FARM'}</div><div class="l">${esc(s.legal)}</div><div class="a">${esc(s.alamat)}</div></div></div>
+        <a class="inv-web">${esc(s.website)}</a>
+      </div>
+      <div class="inv-rule"></div>
+      <div class="inv-title">${meta.title}</div>
+      <div class="inv-banner">${meta.banner}</div>
+      <div class="inv-info">
+        <div class="left">
+          <div class="r"><span class="k">${d.jenis==='invoice'?'Invoice No.':'PI No.'}</span><span>${esc(d.nomor||'-')}</span></div>
+          <div class="r"><span class="k">Date</span><span>${fmtLong(d.tanggal)}</span></div>
+          <div class="r"><span class="k">Order Ref</span><span>${esc(o.no_order||'-')}</span></div>
+          ${o.po_masuk_no?`<div class="r"><span class="k">PO Buyer</span><span>${esc(o.po_masuk_no)}</span></div>`:''}
+        </div>
+        <div class="right">
+          <div class="k">BILL TO</div>
+          <div class="nm">${esc(o.buyer_name||'—')}</div>
+        </div>
+      </div>
+      <table class="inv-tbl">
+        <tr><th style="width:44px;">No.</th><th>Description</th><th style="width:80px;">Qty</th><th style="width:120px;">Unit Price (Rp)</th><th style="width:130px;">Total (Rp)</th></tr>
+        ${itemRows||''}${blankRows}
+        <tr class="sum"><td colspan="4" class="lbl">Sub Total</td><td class="r">Rp ${sub.toLocaleString('id-ID')}</td></tr>
+        ${hasItems?`<tr class="sum"><td colspan="4" class="lbl">Tax (11%)</td><td class="r">Rp ${ppn.toLocaleString('id-ID')}</td></tr>`:''}
+        <tr class="grand"><td colspan="4" class="lbl">TOTAL</td><td class="r">Rp ${total.toLocaleString('id-ID')}</td></tr>
+      </table>
+      <div class="inv-due"><span>${meta.due}</span><span>Rp ${due.toLocaleString('id-ID')}</span></div>
+      <div class="inv-sec-h">PAYMENT INSTRUCTIONS</div>
+      <table class="inv-pay">
+        <tr><td class="k">Bank Name</td><td>${esc(s.bankName)||'-'}</td></tr>
+        <tr><td class="k">Account Name</td><td>${esc(s.bankAccName)||'-'}</td></tr>
+        <tr><td class="k">Account Number</td><td>${esc(s.bankAccNo)||'-'}</td></tr>
+      </table>
+      <div class="inv-sec-h">NOTES</div>
+      <div class="inv-notes"><ol>
+        <li>Mohon lakukan pembayaran sesuai nominal di atas.</li>
+        <li>Cantumkan nomor ${d.jenis==='invoice'?'invoice':'PI'} (${esc(d.nomor||'-')}) sebagai referensi pembayaran.</li>
+        ${d.jenis==='pi_dp'?`<li>Sisa pelunasan ditagih via Invoice terpisah setelah barang dikirim.</li>`:''}
+      </ol></div>
+      <div class="inv-sign">
+        <div class="city">${esc(s.kota)||'Purwakarta'}, ${fmtLong(d.tanggal)}</div>
+        <div class="co">${esc(s.legal)||esc(s.brand)||'TROPICA FARM'}</div>
+        <div class="sp"></div>
+        <div>(__________________________)</div>
+        <div class="nm">${esc(s.signer)||''}</div>
+      </div>
+    </div></div>
+  </div></div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('[data-poclose]').onclick=()=>ov.remove();
+  ov.querySelector('[data-poprint]').onclick=()=>window.print();
+  const back=ov.querySelector('.overlay'); back.onclick=(e)=>{ if(e.target===back) ov.remove(); };
 }
 
 // ===== Hutang usaha: Tagihan supplier + Pembayaran (Langkah 8) =====
@@ -1473,7 +1661,7 @@ async function loadBills(){
   if(suppliersCache===null){ const { data }=await sb.from('suppliers').select('id,nama').order('nama'); suppliersCache=data||[]; }
   if(ordersCache===null){
     const { data:bs }=await sb.from('buyers').select('id,nama').order('nama'); buyersCache=bs||[];
-    const { data:os }=await sb.from('orders').select('id,no_order,status,nilai_jual,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,po_masuk_no').order('created_at',{ascending:false});
+    const { data:os }=await sb.from('orders').select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,po_masuk_no').order('created_at',{ascending:false});
     const bmap={}; (buyersCache||[]).forEach(b=>bmap[b.id]=b.nama);
     ordersCache=(os||[]).map(o=>({...o, buyer_name:bmap[o.buyer_id]||'—'}));
   }
@@ -1777,6 +1965,332 @@ async function saveEditBill(){
   orderSummary={}; billsCache=null; billView='list'; editBillId=null; render();
 }
 
+// ===== Pengiriman (buku kirim): jenis teh + supplier per item + resi =====
+async function resolveBuyerId(name){
+  const found=(buyersCache||[]).find(b=>(b.nama||'').toLowerCase()===name.toLowerCase());
+  if(found) return { id:found.id };
+  const { data:nb, error }=await sb.from('buyers').insert({nama:name}).select('id,nama').single();
+  if(error) return { error:error.message };
+  (buyersCache=buyersCache||[]).push(nb);
+  return { id:nb.id };
+}
+async function loadShipments(){
+  shipLoading=true;
+  if(suppliersCache===null){ const { data }=await sb.from('suppliers').select('id,nama').order('nama'); suppliersCache=data||[]; }
+  if(buyersCache===null){ const { data:bs }=await sb.from('buyers').select('id,nama,alamat,kontak').order('nama'); buyersCache=bs||[]; }
+  if(ordersCache===null){
+    const { data:os }=await sb.from('orders').select('id,no_order,status,buyer_id,items').order('created_at',{ascending:false});
+    const bmap={}; (buyersCache||[]).forEach(b=>bmap[b.id]=b.nama);
+    ordersCache=(os||[]).map(o=>({...o, buyer_name:bmap[o.buyer_id]||'—'}));
+  }
+  const { data:ss }=await sb.from('shipments')
+    .select('id,no_kirim,order_id,buyer_id,jenis,ekspedisi,no_resi,tanggal_kirim,tanggal_terima,status,catatan,buyers(nama,alamat,kontak),orders(no_order,po_masuk_no),shipment_items(id,nama_item,qty,jumlah,netto,keterangan,supplier_id)')
+    .order('created_at',{ascending:false});
+  shipCache=(ss||[]).map(s=>({...s, buyer_name:s.buyers?s.buyers.nama:'—', buyer_alamat:s.buyers?s.buyers.alamat:'', buyer_kontak:s.buyers?s.buyers.kontak:'', order_no:s.orders?s.orders.no_order:null, order_po_masuk:s.orders?s.orders.po_masuk_no:null}));
+  shipLoading=false;
+  render();
+}
+function shipJenisLabel(j){ return (SHIP_JENIS.find(x=>x[0]===j)||['',j])[1]; }
+function shipItemRowHTML(it){
+  it=it||{};
+  const sopts=(suppliersCache||[]).map(s=>`<option value="${s.id}" ${s.id===it.supplier_id?'selected':''}>${esc(s.nama)}</option>`).join('');
+  return `<div class="ship-item-row" style="border:1px solid var(--paper-line);border-radius:8px;padding:8px;margin-bottom:8px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 26px;gap:5px;align-items:center;margin-bottom:5px">
+      <input class="o-input si-nama" placeholder="Jenis teh / description" value="${escAttr(it.nama_item||'')}" style="padding:7px 8px">
+      <select class="o-input si-sup" style="padding:7px 4px"><option value="">— supplier asal —</option>${sopts}</select>
+      <button type="button" class="o-btn ghost si-del" style="padding:6px 4px;color:var(--danger);border-color:#E3B9B3">×</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1.3fr;gap:5px">
+      <input class="o-input si-jumlah" placeholder="Jumlah (25 karton)" value="${escAttr(it.jumlah||'')}" style="padding:7px 6px">
+      <input class="o-input si-netto" placeholder="Netto (10 kg)" value="${escAttr(it.netto||'')}" style="padding:7px 6px">
+      <input class="o-input si-qty" placeholder="Qty total (250 kg)" value="${escAttr(it.qty||'')}" style="padding:7px 6px">
+      <input class="o-input si-ket" placeholder="Keterangan kemasan" value="${escAttr(it.keterangan||'')}" style="padding:7px 6px">
+    </div>
+  </div>`;
+}
+function shipItemsEditorHTML(items){
+  items=items||[];
+  const rows=(items.length?items:[{}]).map(shipItemRowHTML).join('');
+  return `<label class="o-field">Rincian isi kiriman (untuk Delivery Order)</label>
+    <p style="font-size:11px;color:var(--ink-soft);margin:0 0 6px">Per item: jenis teh + supplier asal, lalu Jumlah kemasan · Netto/kemasan · Qty total · Keterangan.</p>
+    <div id="shipItemRows">${rows}</div>
+    <button type="button" class="o-btn ghost" id="shipItemAdd" style="padding:5px 12px;font-size:12px;margin-top:2px">+ Tambah item</button>`;
+}
+function collectShipItems(){
+  const out=[];
+  document.querySelectorAll('#shipItemRows .ship-item-row').forEach(r=>{
+    const nama_item=r.querySelector('.si-nama').value.trim();
+    const qty=r.querySelector('.si-qty').value.trim();
+    const jumlah=r.querySelector('.si-jumlah').value.trim();
+    const netto=r.querySelector('.si-netto').value.trim();
+    const keterangan=r.querySelector('.si-ket').value.trim();
+    const supplier_id=r.querySelector('.si-sup').value||null;
+    if(nama_item||qty||jumlah||netto||keterangan||supplier_id) out.push({nama_item, qty, jumlah, netto, keterangan, supplier_id});
+  });
+  return out;
+}
+function bindShipItemEditor(){
+  const cont=document.getElementById('shipItemRows'); if(!cont) return;
+  const bindDel=()=>cont.querySelectorAll('.ship-item-row .si-del').forEach(d=>d.onclick=()=>{ const row=d.closest('.ship-item-row'); if(cont.querySelectorAll('.ship-item-row').length>1) row.remove(); else row.querySelectorAll('input,select').forEach(f=>f.value=''); });
+  const add=document.getElementById('shipItemAdd');
+  if(add) add.onclick=()=>{ cont.insertAdjacentHTML('beforeend', shipItemRowHTML({})); bindDel(); };
+  bindDel();
+}
+function shipStatusSelect(s){
+  return `<select class="o-input" data-shipstatus="${s.id}" style="padding:5px 8px;font-size:12px;width:auto">${SHIP_STATUS.map(x=>`<option value="${x[0]}" ${x[0]===(s.status||'dikirim')?'selected':''}>${x[1]}</option>`).join('')}</select>`;
+}
+function shipForm(s){
+  s=s||{};
+  const isEdit=!!editShipId;
+  const oopts=(ordersCache||[]).map(o=>`<option value="${o.id}" ${o.id===s.order_id?'selected':''}>${esc(o.no_order)} · ${esc(o.buyer_name)}</option>`).join('');
+  const bopts=(buyersCache||[]).map(b=>`<option value="${b.id}" ${b.id===s.buyer_id?'selected':''}>${esc(b.nama)}</option>`).join('');
+  const seq=String((shipCache?shipCache.length:0)+1).padStart(3,'0');
+  const items=(s.shipment_items&&s.shipment_items.length)?s.shipment_items:[];
+  return `
+    ${(ordersCache&&ordersCache.length)?`<label class="o-field" style="margin-top:0">Untuk order (opsional)</label>
+    <select class="o-input" id="shOrder"><option value="">— tanpa order / isi buyer manual —</option>${oopts}</select>`:''}
+    <label class="o-field"${(ordersCache&&ordersCache.length)?'':' style="margin-top:0"'}>Buyer (penerima)</label>
+    <select class="o-input" id="shBuyer"><option value="">— pilih buyer —</option>${bopts}<option value="__new">+ Buyer baru…</option></select>
+    <div id="shBuyerNewWrap" style="display:none"><label class="o-field">Nama buyer baru</label><input class="o-input" id="shBuyerNew" placeholder="mis. PT Sejahtera"></div>
+    <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
+      <div><label class="o-field">Kontak penerima</label><input class="o-input" id="shKontak" value="${escAttr(s.buyer_kontak||'')}" placeholder="mis. Pak Budi 0812…"></div>
+      <div><label class="o-field">Alamat penerima (SHIP TO)</label><input class="o-input" id="shAlamat" value="${escAttr(s.buyer_alamat||'')}" placeholder="alamat kirim buyer"></div>
+    </div>
+    <p style="font-size:11px;color:var(--ink-soft);margin:2px 0 8px">Otomatis terisi dari data buyer saat dipilih; kalau diubah, tersimpan untuk pengiriman buyer ini berikutnya.</p>
+    <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
+      <div><label class="o-field">No surat jalan / kirim</label><input class="o-input" id="shNo" value="${escAttr(s.no_kirim||('SJ-'+seq))}"></div>
+      <div><label class="o-field">Jenis kiriman</label><select class="o-input" id="shJenis">${SHIP_JENIS.map(j=>`<option value="${j[0]}" ${j[0]===(s.jenis||'barang')?'selected':''}>${j[1]}</option>`).join('')}</select></div>
+    </div>
+    ${shipItemsEditorHTML(items)}
+    <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
+      <div><label class="o-field">Ekspedisi</label><input class="o-input" id="shEksp" value="${escAttr(s.ekspedisi||'')}" placeholder="mis. JNE, ambil sendiri"></div>
+      <div><label class="o-field">No resi</label><input class="o-input" id="shResi" value="${escAttr(s.no_resi||'')}"></div>
+    </div>
+    <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
+      <div><label class="o-field">Tanggal kirim</label><input class="o-input" id="shTgl" type="date" value="${s.tanggal_kirim||today()}"></div>
+      <div><label class="o-field">Status</label><select class="o-input" id="shStatus">${SHIP_STATUS.map(x=>`<option value="${x[0]}" ${x[0]===(s.status||'dikirim')?'selected':''}>${x[1]}</option>`).join('')}</select></div>
+    </div>
+    <div id="shTerimaWrap" style="display:${s.status==='diterima'?'block':'none'}"><label class="o-field">Tanggal diterima</label><input class="o-input" id="shTerima" type="date" value="${s.tanggal_terima||''}"></div>
+    <label class="o-field">Catatan</label>
+    <input class="o-input" id="shCatatan" value="${escAttr(s.catatan||'')}" placeholder="opsional">
+    <div id="shErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:8px"></div>
+    <div style="display:flex;gap:8px;margin-top:6px">
+      <button class="o-btn" id="shSave">${isEdit?'Simpan perubahan':'Simpan pengiriman'}</button>
+      <button class="o-btn ghost" id="shCancel">Batal</button>
+    </div>`;
+}
+function viewShipFormPage(){
+  let s={};
+  if(shipView==='edit'&&editShipId){ s=(shipCache||[]).find(x=>x.id===editShipId)||{}; }
+  return `<div class="o-wrap" style="max-width:600px">
+    <div class="o-head"><h2 class="o-title">${shipView==='edit'?'Edit pengiriman':'Pengiriman baru'}</h2></div>
+    <div class="o-card">${shipForm(s)}</div>
+  </div>`;
+}
+function viewShipList(){
+  const rows=shipCache.map(s=>{
+    const items=s.shipment_items||[];
+    const sub=items.map(i=>i.nama_item).filter(Boolean).join(', ');
+    return `<tr>
+      <td style="font-weight:600;color:var(--tea-dark)">${esc(s.no_kirim)}${sub?`<div style="font-weight:400;font-size:11px;color:var(--ink-soft)">${esc(sub)}</div>`:''}</td>
+      <td>${esc(s.buyer_name)}${s.order_no?`<div style="font-size:11px;color:var(--ink-soft)">${esc(s.order_no)}</div>`:''}</td>
+      <td>${esc(shipJenisLabel(s.jenis))}</td>
+      <td>${esc(s.ekspedisi||'-')}${s.no_resi?`<div style="font-size:11px;color:var(--ink-soft)">${esc(s.no_resi)}</div>`:''}</td>
+      <td>${s.tanggal_kirim?fmtLong(s.tanggal_kirim):'-'}</td>
+      <td>${shipStatusSelect(s)}</td>
+      <td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-printship="${s.id}" style="padding:4px 9px">Cetak DO</button> <button class="o-btn ghost" data-editship="${s.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delship="${s.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>
+    </tr>`;
+  }).join('');
+  return `<div class="o-wrap">
+    <div class="o-head"><h2 class="o-title">Pengiriman (buku kirim)</h2><button class="o-btn" id="shNew">+ Pengiriman</button></div>
+    <div class="o-card" style="padding:0;overflow:hidden">
+      <table class="o-table">
+        <thead><tr><th>No / isi</th><th>Buyer</th><th>Jenis</th><th>Ekspedisi / resi</th><th>Tgl kirim</th><th>Status</th><th></th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="7" class="o-empty">Belum ada pengiriman. Klik "+ Pengiriman".</td></tr>`}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+function viewShipModule(){
+  if(shipCache===null){ if(!shipLoading) loadShipments(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
+  if(shipView==='new'||shipView==='edit') return viewShipFormPage();
+  return viewShipList();
+}
+// ── Cetak Delivery Order / Nota Pengiriman Barang (mengikuti template user) ──
+function openShipmentDO(shipId){
+  const s=(shipCache||[]).find(x=>x.id===shipId); if(!s) return;
+  const se=state.seller||{};
+  const items=s.shipment_items||[];
+  const itemRows=items.map((r,i)=>`<tr>
+    <td class="c">${i+1}</td>
+    <td class="t">${esc(r.nama_item)}</td>
+    <td class="c">${esc(r.jumlah||'-')}</td>
+    <td class="c">${esc(r.netto||'-')}</td>
+    <td class="c">${esc(r.qty||'-')}</td>
+    <td class="t">${esc(r.keterangan||'')}</td>
+  </tr>`).join('');
+  const blankRows=Array.from({length:Math.max(0,3-items.length)}).map(()=>`<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>`).join('');
+  const shipTo=[esc(s.buyer_kontak||''), esc(s.buyer_alamat||'')].filter(Boolean).map(x=>`<div class="ad">${x}</div>`).join('');
+  const poRef=esc(s.order_po_masuk||s.order_no||'-');
+  const shipVia=esc(s.ekspedisi||'Delivery');
+  const dParts=(s.tanggal_kirim||today()).split('-');
+  const warehouseDate=`${dParts[2]}/${dParts[1]}/${dParts[0]}`;
+  let ov=document.getElementById('poPrintOverlay'); if(ov) ov.remove();
+  ov=document.createElement('div'); ov.id='poPrintOverlay';
+  ov.innerHTML=`<div class="overlay"><div class="doc-wrap">
+    <div class="doc-bar no-print">
+      <button class="print" data-poprint="1">Print / Simpan PDF</button>
+      <button class="close" data-poclose="1">Tutup</button>
+    </div>
+    <div id="printArea"><div class="inv">
+      <div class="inv-head">
+        <div class="inv-brand">${invLogo()}<div class="txt"><div class="b">${esc(se.brand)||'TROPICA FARM'}</div><div class="l">${esc(se.legal)}</div><div class="a">${esc(se.alamat)}</div></div></div>
+      </div>
+      <div class="inv-rule"></div>
+      <div class="inv-title" style="font-size:22px">Nota Pengiriman Barang</div>
+      <div class="inv-info">
+        <div class="left">
+          <div class="r"><span class="k">Delivery No.</span><span>${esc(s.no_kirim||'-')}</span></div>
+          <div class="r"><span class="k">Delivery Date</span><span>${s.tanggal_kirim?fmtLong(s.tanggal_kirim):fmtLong(today())}</span></div>
+          <div class="r"><span class="k">PO Reference</span><span>${poRef}</span></div>
+          <div class="r"><span class="k">Ship Via</span><span>${shipVia}</span></div>
+          ${s.no_resi?`<div class="r"><span class="k">No. Resi</span><span>${esc(s.no_resi)}</span></div>`:''}
+        </div>
+        <div class="right">
+          <div class="k">SHIP TO</div>
+          <div class="nm">${esc(s.buyer_name||'—')}</div>
+          ${shipTo}
+        </div>
+      </div>
+      <table class="inv-tbl">
+        <tr><th style="width:36px;">No.</th><th>Description</th><th style="width:80px;">Jumlah</th><th style="width:70px;">Netto</th><th style="width:80px;">Qty</th><th style="width:120px;">Keterangan kemasan</th></tr>
+        ${itemRows||''}${blankRows}
+      </table>
+      <div class="inv-sec-h">CATATAN</div>
+      <div class="inv-notes"><p style="margin:0">Kondisi dan jumlah barang sewaktu di muat dalam keadaan baik dan utuh sesuai yang tercantum pada Nota. Kerusakan atau kehilangan sebelum sampai ke tempat tujuan menjadi tanggung jawab pihak pengangkutan.${s.catatan?` ${esc(s.catatan)}`:''}</p></div>
+      <div style="margin-top:14px;font-size:12.5px;color:var(--ink)">Gudang ${esc(se.legal)||'PT Global Tropica Farmindo'}, ${warehouseDate}</div>
+      <table style="width:100%;margin-top:8px;border-collapse:collapse;text-align:center;font-size:12px">
+        <tr>
+          <td style="width:25%;padding:6px 4px;color:var(--ink-soft)">Prepared By</td>
+          <td style="width:25%;padding:6px 4px;color:var(--ink-soft)">Approved</td>
+          <td style="width:25%;padding:6px 4px;color:var(--ink-soft)">Shipped By</td>
+          <td style="width:25%;padding:6px 4px;color:var(--ink-soft)">Received By</td>
+        </tr>
+        <tr>
+          <td style="height:54px"></td><td></td><td></td><td></td>
+        </tr>
+        <tr>
+          <td style="padding:4px;border-top:1px solid var(--paper-line)">(____________)</td>
+          <td style="padding:4px;border-top:1px solid var(--paper-line)">(____________)</td>
+          <td style="padding:4px;border-top:1px solid var(--paper-line)">(____________)</td>
+          <td style="padding:4px;border-top:1px solid var(--paper-line)">(____________)</td>
+        </tr>
+        <tr style="color:var(--ink-soft)">
+          <td style="padding:2px 4px">Date</td><td style="padding:2px 4px">Date</td><td style="padding:2px 4px">Date</td><td style="padding:2px 4px">Date</td>
+        </tr>
+      </table>
+    </div></div>
+  </div></div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('[data-poclose]').onclick=()=>ov.remove();
+  ov.querySelector('[data-poprint]').onclick=()=>window.print();
+  const back=ov.querySelector('.overlay'); back.onclick=(e)=>{ if(e.target===back) ov.remove(); };
+}
+async function saveShipment(){
+  const err=document.getElementById('shErr'); if(err) err.textContent='';
+  const orderEl=document.getElementById('shOrder');
+  let order_id=orderEl?(orderEl.value||null):null;
+  const bsel=document.getElementById('shBuyer').value;
+  const bnewEl=document.getElementById('shBuyerNew');
+  const bnew=bnewEl?bnewEl.value.trim():'';
+  const no=document.getElementById('shNo').value.trim();
+  const jenis=document.getElementById('shJenis').value||'barang';
+  const eksp=document.getElementById('shEksp').value.trim();
+  const resi=document.getElementById('shResi').value.trim();
+  const tgl=document.getElementById('shTgl').value||today();
+  const status=document.getElementById('shStatus').value||'dikirim';
+  const terima=status==='diterima'?(document.getElementById('shTerima').value||tgl):null;
+  const catatan=document.getElementById('shCatatan').value.trim();
+  const shipKontak=((document.getElementById('shKontak')||{}).value||'').trim();
+  const shipAlamat=((document.getElementById('shAlamat')||{}).value||'').trim();
+  const items=collectShipItems();
+  if(!no){ if(err) err.textContent='No surat jalan / kirim wajib diisi.'; return; }
+  const btn=document.getElementById('shSave'); const lbl=btn.textContent; btn.disabled=true; btn.textContent='Menyimpan…';
+  const reset=()=>{ btn.disabled=false; btn.textContent=lbl; };
+  let buyer_id=null;
+  if(bsel==='__new'){
+    if(!bnew){ if(err) err.textContent='Isi nama buyer baru.'; reset(); return; }
+    const r=await resolveBuyerId(bnew); if(r.error){ if(err) err.textContent='Gagal simpan buyer: '+r.error; reset(); return; } buyer_id=r.id;
+  } else if(bsel){ buyer_id=bsel; }
+  if(order_id && !buyer_id){ const o=(ordersCache||[]).find(x=>x.id===order_id); if(o) buyer_id=o.buyer_id||null; }
+  if(!buyer_id && !order_id){ if(err) err.textContent='Pilih buyer atau order dulu.'; reset(); return; }
+  // simpan alamat/kontak SHIP TO ke data buyer supaya tak perlu ketik ulang berikutnya
+  if(buyer_id && (shipAlamat||shipKontak)){
+    await sb.from('buyers').update({ alamat:shipAlamat||null, kontak:shipKontak||null }).eq('id',buyer_id);
+    const bc=(buyersCache||[]).find(x=>x.id===buyer_id); if(bc){ bc.alamat=shipAlamat||null; bc.kontak=shipKontak||null; }
+  }
+  const header={ no_kirim:no, order_id, buyer_id, jenis, ekspedisi:eksp||null, no_resi:resi||null, tanggal_kirim:tgl, tanggal_terima:terima, status, catatan:catatan||null };
+  let shipmentId=editShipId;
+  if(editShipId){
+    const { error:eu }=await sb.from('shipments').update(header).eq('id',editShipId);
+    if(eu){ if(err) err.textContent='Gagal simpan: '+eu.message; reset(); return; }
+    await sb.from('shipment_items').delete().eq('shipment_id',editShipId);
+  } else {
+    const { data, error:ei }=await sb.from('shipments').insert(header).select('id').single();
+    if(ei){ if(err) err.textContent='Gagal simpan: '+ei.message; reset(); return; }
+    shipmentId=data.id;
+  }
+  if(items.length){
+    const payload=items.map(i=>({shipment_id:shipmentId, nama_item:i.nama_item, qty:i.qty, jumlah:i.jumlah||null, netto:i.netto||null, keterangan:i.keterangan||null, supplier_id:i.supplier_id}));
+    const { error:eit }=await sb.from('shipment_items').insert(payload);
+    if(eit){ if(err) err.textContent='Header tersimpan, tapi rincian item gagal: '+eit.message; }
+  }
+  shipCache=null; shipView='list'; editShipId=null; render();
+}
+async function deleteShipment(id){
+  if(!confirm('Hapus pengiriman ini? Rincian isinya ikut terhapus.')) return;
+  const { error }=await sb.from('shipments').delete().eq('id',id);
+  if(error){ alert('Gagal hapus: '+error.message); return; }
+  shipCache=null; render();
+}
+function bindShipTab(){
+  const nb=document.getElementById('shNew'); if(nb) nb.onclick=()=>{ shipView='new'; editShipId=null; render(); };
+  const sv=document.getElementById('shSave'); if(sv) sv.onclick=saveShipment;
+  const cx=document.getElementById('shCancel'); if(cx) cx.onclick=()=>{ shipView='list'; editShipId=null; render(); };
+  const fillShipTo=(buyerId)=>{
+    const b=(buyersCache||[]).find(x=>x.id===buyerId); if(!b) return;
+    const ka=document.getElementById('shKontak'), al=document.getElementById('shAlamat');
+    if(ka && b.kontak!=null) ka.value=b.kontak||'';
+    if(al && b.alamat!=null) al.value=b.alamat||'';
+  };
+  const bsel=document.getElementById('shBuyer');
+  if(bsel) bsel.onchange=()=>{ const w=document.getElementById('shBuyerNewWrap'); if(w) w.style.display=bsel.value==='__new'?'block':'none'; if(bsel.value&&bsel.value!=='__new') fillShipTo(bsel.value); };
+  const st=document.getElementById('shStatus');
+  if(st) st.onchange=()=>{ const w=document.getElementById('shTerimaWrap'); if(w) w.style.display=st.value==='diterima'?'block':'none'; };
+  const osel=document.getElementById('shOrder');
+  if(osel) osel.onchange=()=>{
+    const o=(ordersCache||[]).find(x=>x.id===osel.value);
+    if(!o) return;
+    const b=document.getElementById('shBuyer'); if(b && o.buyer_id){ b.value=o.buyer_id; const w=document.getElementById('shBuyerNewWrap'); if(w) w.style.display='none'; fillShipTo(o.buyer_id); }
+    const cont=document.getElementById('shipItemRows');
+    if(cont && collectShipItems().length===0 && Array.isArray(o.items) && o.items.length){
+      cont.innerHTML=o.items.map(i=>shipItemRowHTML({nama_item:i.nama, qty:(i.qty!=null&&i.qty!==''?String(i.qty)+(i.satuan?' '+i.satuan:''):'')})).join('');
+      bindShipItemEditor();
+    }
+  };
+  document.querySelectorAll('[data-printship]').forEach(b=>b.onclick=()=>openShipmentDO(b.dataset.printship));
+  document.querySelectorAll('[data-editship]').forEach(b=>b.onclick=()=>{ editShipId=b.dataset.editship; shipView='edit'; render(); });
+  document.querySelectorAll('[data-delship]').forEach(b=>b.onclick=()=>deleteShipment(b.dataset.delship));
+  document.querySelectorAll('[data-shipstatus]').forEach(sel=>sel.onchange=async()=>{
+    const val=sel.value;
+    const patch={status:val, tanggal_terima: val==='diterima'?today():null};
+    const { error }=await sb.from('shipments').update(patch).eq('id',sel.dataset.shipstatus);
+    if(error){ alert('Gagal ubah status: '+error.message); return; }
+    const s=(shipCache||[]).find(x=>x.id===sel.dataset.shipstatus); if(s){ s.status=val; s.tanggal_terima=patch.tanggal_terima; }
+  });
+  bindShipItemEditor();
+}
+
 function renderMonthSelect(){
   const sel=document.getElementById('monthSelect');
   sel.innerHTML=state.months.map(m=>`<option value="${m}" ${m===state.currentMonth?'selected':''}>${m}</option>`).join('');
@@ -1792,6 +2306,8 @@ function render(){
   if(activeTab==='po_keluar'){ c.innerHTML=viewPOModule(); bindPOTab(); return; }
   if(activeTab==='tagihan'){ c.innerHTML=viewTagihanModule(); bindTagihan(); return; }
   if(activeTab==='pembayaran'){ c.innerHTML=viewPembayaranModule(); bindPembayaran(); return; }
+  if(activeTab==='pengiriman'){ c.innerHTML=viewShipModule(); bindShipTab(); return; }
+  if(activeTab==='doc_jual'){ c.innerHTML=viewPenjualanLink(); bindPenjualanLink(); return; }
   if(!views[activeTab]){ c.innerHTML=viewPlaceholder(activeTab); return; }
   if(state.buyers.length===0 && activeTab!=='modal' && activeTab!=='ringkasan' && activeTab!=='report'){
     c.innerHTML=`<div class="card empty">Belum ada buyer. Klik "+ Buyer baru" di atas untuk mulai.</div>`; return;
@@ -2251,9 +2767,93 @@ function viewPenjualanDetail(o){
       <p style="margin:0;color:var(--ink-soft);font-size:12.5px">Tanggal ${fmtLong(o.tanggal_order)}${o.po_masuk_no?` · PO buyer: ${esc(o.po_masuk_no)}`:''}</p>
     </div>
     ${itemsDisplayCard('Item (dari order)', o.items)}
+    ${sampleGratisSection(o)}
     ${docsSection(o)}
     ${paymentsSection(o)}
   </div>`;
+}
+function sampleGratisSection(o){
+  if(o.status!=='sample') return '';
+  const canCost=canSeeCost();
+  return `<div class="o-card">
+    <p style="margin:0 0 4px;font-weight:600;color:var(--ink)">Sample gratis <span style="font-weight:400;color:var(--ink-soft);font-size:12px">(tanpa tagih)</span></p>
+    <p style="margin:0 0 10px;color:var(--ink-soft);font-size:12.5px">Untuk contoh yang tidak ditagih: cetak Surat Jalan Sample, dan (keuangan) catat biayanya sebagai Biaya usaha / marketing. Kalau ditagih, terbitkan PI Sample di bawah.</p>
+    <button class="o-btn ghost" id="sampleDOprint">Cetak Surat Jalan Sample</button>
+    ${canCost?`<div style="border-top:1px solid var(--paper-line);margin-top:12px;padding-top:12px">
+      <div class="o-grid" style="grid-template-columns:1fr 1.4fr;margin-bottom:0">
+        <div><label class="o-field" style="margin-top:0">Biaya sample (Rp)</label><input class="o-input" id="sgCost" type="number" inputmode="numeric" placeholder="mis. 150000"></div>
+        <div><label class="o-field" style="margin-top:0">Catatan</label><input class="o-input" id="sgNote" placeholder="mis. sample marketing Wedrink"></div>
+      </div>
+      <div id="sgErr" style="font-size:12.5px;min-height:16px;margin-top:8px"></div>
+      <button class="o-btn" id="sgSave" style="margin-top:2px">Catat sebagai Biaya usaha (marketing)</button>
+    </div>`:''}
+  </div>`;
+}
+async function saveSampleGratisCost(){
+  const err=document.getElementById('sgErr'); if(err){ err.textContent=''; err.style.color='var(--danger)'; }
+  const oid=pjOrderId||openOrderId;
+  const jumlah=Number(document.getElementById('sgCost').value)||0;
+  const note=document.getElementById('sgNote').value.trim();
+  if(jumlah<=0){ if(err) err.textContent='Isi biaya sample (lebih dari 0).'; return; }
+  const btn=document.getElementById('sgSave'); btn.disabled=true; btn.textContent='Menyimpan…';
+  const { error }=await sb.from('transactions').insert({ tanggal:today(), arah:'keluar', jenis:'biaya_usaha', jumlah, order_id:oid, kategori:'Sample gratis / marketing', catatan:note||null });
+  if(error){ if(err) err.textContent='Gagal: '+error.message; btn.disabled=false; btn.textContent='Catat sebagai Biaya usaha (marketing)'; return; }
+  delete orderSummary[oid];
+  document.getElementById('sgCost').value=''; document.getElementById('sgNote').value='';
+  btn.disabled=false; btn.textContent='Catat sebagai Biaya usaha (marketing)';
+  if(err){ err.style.color='#1D6B4F'; err.textContent='Tersimpan sebagai Biaya usaha ✓'; }
+}
+function openSampleDO(orderId){
+  const o=(ordersCache||[]).find(x=>x.id===orderId); if(!o) return;
+  const s=state.seller||{};
+  const items=o.items||[];
+  const itemRows=items.map((r,i)=>`<tr><td class="c">${i+1}</td><td class="t">${esc(r.nama)}</td><td class="c">${esc(String(r.qty!=null?r.qty:''))} ${esc(r.satuan||'')}</td></tr>`).join('');
+  const blankRows=Array.from({length:Math.max(0,3-items.length)}).map(()=>`<tr><td class="c">&nbsp;</td><td></td><td></td></tr>`).join('');
+  let ov=document.getElementById('poPrintOverlay'); if(ov) ov.remove();
+  ov=document.createElement('div'); ov.id='poPrintOverlay';
+  ov.innerHTML=`<div class="overlay"><div class="doc-wrap">
+    <div class="doc-bar no-print">
+      <button class="print" data-poprint="1">Print / Simpan PDF</button>
+      <button class="close" data-poclose="1">Tutup</button>
+    </div>
+    <div id="printArea"><div class="inv">
+      <div class="inv-head">
+        <div class="inv-brand">${invLogo()}<div class="txt"><div class="b">${esc(s.brand)||'TROPICA FARM'}</div><div class="l">${esc(s.legal)}</div><div class="a">${esc(s.alamat)}</div></div></div>
+      </div>
+      <div class="inv-rule"></div>
+      <div class="inv-title">SURAT JALAN</div>
+      <div class="inv-banner">SAMPLE — TIDAK DIPERJUALBELIKAN</div>
+      <div class="inv-info">
+        <div class="left">
+          <div class="r"><span class="k">No. SJ Sample</span><span>SJ-S/${esc(o.no_order||'-')}</span></div>
+          <div class="r"><span class="k">Tanggal</span><span>${fmtLong(today())}</span></div>
+          <div class="r"><span class="k">Ref. Order</span><span>${esc(o.no_order||'-')}</span></div>
+        </div>
+        <div class="right">
+          <div class="k">KEPADA / PENERIMA</div>
+          <div class="nm">${esc(o.buyer_name||'—')}</div>
+        </div>
+      </div>
+      <table class="inv-tbl">
+        <tr><th style="width:44px;">No.</th><th>Description</th><th style="width:120px;">Quantity</th></tr>
+        ${itemRows||''}${blankRows}
+      </table>
+      <div class="inv-sec-h">CATATAN</div>
+      <div class="inv-notes"><ol>
+        <li>Barang di atas adalah <b>contoh (sample)</b> — tidak untuk diperjualbelikan.</li>
+        <li>Mohon konfirmasi penerimaan barang.</li>
+      </ol></div>
+      <div class="inv-sign">
+        <div class="city">Penerima</div>
+        <div class="sp"></div>
+        <div>(__________________________)</div>
+      </div>
+    </div></div>
+  </div></div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('[data-poclose]').onclick=()=>ov.remove();
+  ov.querySelector('[data-poprint]').onclick=()=>window.print();
+  const back=ov.querySelector('.overlay'); back.onclick=(e)=>{ if(e.target===back) ov.remove(); };
 }
 function bindPenjualanLink(){
   if(pjOrderId){
@@ -2268,8 +2868,11 @@ function bindDocPayHandlers(){
   const dc=document.getElementById('docCancel'); if(dc) dc.onclick=()=>{ sampleFormOpen=false; editDocId=null; render(); };
   const ds=document.getElementById('docSave'); if(ds) ds.onclick=saveDoc;
   const dj=document.getElementById('docJenis'); if(dj) dj.onchange=()=>{ const no=document.getElementById('docNo'); if(no && !editDocId) no.value=docNoSuggest(dj.value, orderDocs[openOrderId]||[]); };
+  const sdo=document.getElementById('sampleDOprint'); if(sdo) sdo.onclick=()=>openSampleDO(pjOrderId||openOrderId);
+  const sgs=document.getElementById('sgSave'); if(sgs) sgs.onclick=saveSampleGratisCost;
   document.querySelectorAll('[data-editdoc]').forEach(b=>b.onclick=()=>{ editDocId=b.dataset.editdoc; sampleFormOpen=true; render(); });
   document.querySelectorAll('[data-deldoc]').forEach(b=>b.onclick=()=>deleteDoc(b.dataset.deldoc));
+  document.querySelectorAll('[data-printdoc]').forEach(b=>b.onclick=()=>openDocPrint(b.dataset.printdoc));
   const bpa=document.getElementById('bpAdd'); if(bpa) bpa.onclick=()=>{ buyerPayFormOpen=true; render(); };
   const bpc=document.getElementById('bpCancel'); if(bpc) bpc.onclick=()=>{ buyerPayFormOpen=false; render(); };
   const bps=document.getElementById('bpSave'); if(bps) bps.onclick=saveBuyerPayment;
