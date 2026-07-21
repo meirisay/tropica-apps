@@ -446,10 +446,9 @@ const TABS = [
 const NAV = [
   {id:'nav_dashboard', label:'Dashboard', icon:'home', tab:'ringkasan', roles:['owner','keuangan']},
   {id:'nav_order', label:'Order', icon:'clipboard', children:[
-    {id:'daftar_order', label:'Daftar Order', roles:['owner','keuangan','sales']},
-    {id:'sample',       label:'Sample',       roles:['owner','keuangan','sales']},
-    {id:'doc_jual',     label:'PI & Invoice', roles:['owner','keuangan','sales']},
-    {id:'po_keluar',    label:'PO Keluar',    roles:['owner','keuangan','sales']},
+    {id:'daftar_order', label:'Daftar Order',  roles:['owner','keuangan','sales']},
+    {id:'sample',       label:'Riwayat Sample', roles:['owner','keuangan','sales']},
+    {id:'po_keluar',    label:'PO Keluar',     roles:['owner','keuangan','sales']},
     {id:'pengiriman',   label:'Pengiriman',   roles:['owner','keuangan','staff','sales']},
   ]},
   {id:'nav_piutang', label:'Piutang', icon:'coin', children:[
@@ -474,6 +473,9 @@ NAV.forEach(top=>{
   if(top.tab) NAV_FLAT[top.tab]={label:top.label, roles:top.roles||[], parent:top.id};
   (top.children||[]).forEach(c=>{ NAV_FLAT[c.id]={label:c.label, roles:c.roles||[], parent:top.id}; });
 });
+// doc_jual (detail sample: terbitkan/cetak PI Sample) tetap bisa diakses dari Riwayat Sample,
+// tapi TIDAK ditampilkan sebagai menu tersendiri.
+NAV_FLAT['doc_jual']={label:'PI Sample', roles:['owner','keuangan','sales'], parent:'nav_order'};
 const FINANCE_TABS = ['ringkasan','modal','kas','biaya','penjualan','piutang','profit','report'];
 const LANDING = {owner:'ringkasan', keuangan:'ringkasan', staff:'pengiriman', sales:'daftar_order'};
 let currentRole = 'owner';
@@ -1014,13 +1016,13 @@ function viewOrderCard(){
         <tr><td>Status bayar</td><td style="color:${nilai>0&&bayar>=nilai?'#1D6B4F':(bayar>0?'#8A5B0E':'var(--ink-soft)')}">${statusBayar}</td></tr>
         ${costCards}
       </table>
-      <p style="margin:10px 0 0;color:var(--ink-soft);font-size:12px">Pembayaran &amp; PI/Invoice dikelola di menu <b>Penjualan</b> (keuangan). Order ini cukup input item &amp; status.</p>
+      <p style="margin:10px 0 0;color:var(--ink-soft);font-size:12px">Pembayaran buyer (DP &amp; pelunasan) dicatat di kartu ini (bawah). Tagihan supplier ada di menu <b>Tagihan Supplier</b>.</p>
     </div>
     ${itemsDisplayCard('Item order', o.items)}
     ${sampleViewRO(o)}
     ${talNote}
     ${poSection(o)}
-    ${billsSection(o)}
+    ${paymentsSection(o)}
   </div>`;
 }
 
@@ -1321,7 +1323,7 @@ function viewSampleTab(){
       </table>
     </div>`;
   return `<div class="o-wrap">
-    <div class="o-head"><h2 class="o-title">Sample</h2></div>
+    <div class="o-head"><h2 class="o-title">Riwayat Sample</h2></div>
     <p style="margin:0 0 8px;font-weight:600;color:var(--ink)">Sample berjalan</p>
     ${tbl(sampleRowsHTML(berjalan),'Tidak ada order di tahap sample.')}
     <p style="margin:16px 0 8px;font-weight:600;color:var(--ink)">Riwayat sample <span style="font-weight:400;color:var(--ink-soft);font-size:12px">(sudah lanjut ke PO/berikutnya, tetap tersimpan)</span></p>
@@ -2857,7 +2859,7 @@ function viewPenjualanLink(){
 function viewPenjualanDetail(o){
   return `<div class="o-wrap">
     <div class="o-head">
-      <div><button class="o-btn ghost" id="pjBack">← Daftar penjualan</button></div>
+      <div><button class="o-btn ghost" id="pjBack">← Riwayat Sample</button></div>
       <div>${statusBadge(o.status)}</div>
     </div>
     <div class="o-card">
@@ -2867,7 +2869,6 @@ function viewPenjualanDetail(o){
     ${itemsDisplayCard('Item (dari order)', o.items)}
     ${sampleGratisSection(o)}
     ${docsSection(o)}
-    ${paymentsSection(o)}
   </div>`;
 }
 function sampleGratisSection(o){
@@ -2955,7 +2956,7 @@ function openSampleDO(orderId){
 }
 function bindPenjualanLink(){
   if(pjOrderId){
-    const bk=document.getElementById('pjBack'); if(bk) bk.onclick=()=>{ pjOrderId=null; openOrderId=null; sampleFormOpen=false; buyerPayFormOpen=false; editDocId=null; render(); };
+    const bk=document.getElementById('pjBack'); if(bk) bk.onclick=()=>{ pjOrderId=null; openOrderId=null; sampleFormOpen=false; buyerPayFormOpen=false; editDocId=null; activeTab='sample'; render(); };
     bindDocPayHandlers();
   } else {
     document.querySelectorAll('[data-pjopen]').forEach(b=>b.onclick=()=>{ pjOrderId=b.dataset.pjopen; openOrderId=b.dataset.pjopen; sampleFormOpen=false; buyerPayFormOpen=false; editDocId=null; render(); });
