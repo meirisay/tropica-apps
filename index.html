@@ -447,7 +447,7 @@ const NAV = [
   {id:'nav_dashboard', label:'Dashboard', icon:'home', tab:'ringkasan', roles:['owner','keuangan']},
   {id:'nav_order', label:'Order', icon:'clipboard', children:[
     {id:'daftar_order', label:'Daftar Order',  roles:['owner','keuangan','sales']},
-    {id:'sample',       label:'Riwayat Sample', roles:['owner','keuangan','sales']},
+    {id:'sample',       label:'Order History',  roles:['owner','keuangan','sales']},
     {id:'po_keluar',    label:'PO Keluar',     roles:['owner','keuangan','sales']},
     {id:'pengiriman',   label:'Pengiriman',   roles:['owner','keuangan','staff','sales']},
   ]},
@@ -1323,7 +1323,7 @@ function viewSampleTab(){
       </table>
     </div>`;
   return `<div class="o-wrap">
-    <div class="o-head"><h2 class="o-title">Riwayat Sample</h2></div>
+    <div class="o-head"><h2 class="o-title">Order History</h2></div>
     <p style="margin:0 0 8px;font-weight:600;color:var(--ink)">Sample berjalan</p>
     ${tbl(sampleRowsHTML(berjalan),'Tidak ada order di tahap sample.')}
     <p style="margin:16px 0 8px;font-weight:600;color:var(--ink)">Riwayat sample <span style="font-weight:400;color:var(--ink-soft);font-size:12px">(sudah lanjut ke PO/berikutnya, tetap tersimpan)</span></p>
@@ -1333,6 +1333,41 @@ function viewSampleTab(){
 }
 function bindSampleTab(){
   document.querySelectorAll('.o-row').forEach(r=>r.onclick=()=>{ openOrderId=r.dataset.open; pjOrderId=r.dataset.open; activeTab='doc_jual'; sampleFormOpen=false; poFormOpen=false; buyerPayFormOpen=false; render(); });
+}
+
+// ===== Piutang Buyer (berbasis order) =====
+function viewPiutangBuyer(){
+  if(ordersCache===null){ if(!orderLoading) loadOrders(); return `<div class="o-card">Memuat…</div>`; }
+  const list=ordersCache.filter(o=>o.status!=='batal')
+    .map(o=>({...o, sisa:(Number(o.nilai_jual)||0)-(Number(o.total_bayar_buyer)||0)}))
+    .filter(o=>o.sisa>0.5);
+  const total=list.reduce((s,o)=>s+o.sisa,0);
+  const rows=list.map(o=>{
+    const bayar=Number(o.total_bayar_buyer)||0, nilai=Number(o.nilai_jual)||0;
+    const st = bayar<=0 ? '<span class="o-badge" style="background:#FBF1D8;color:#8A5B0E">Belum bayar</span>' : '<span class="o-badge" style="background:#E6EEF6;color:#1B4E7A">DP masuk</span>';
+    return `<tr class="o-row" data-open="${o.id}">
+      <td style="font-weight:600;color:var(--tea-dark)">${esc(o.no_order)}</td>
+      <td>${esc(o.buyer_name)}</td>
+      <td style="text-align:right">${rp(nilai)}</td>
+      <td style="text-align:right">${rp(bayar)}</td>
+      <td style="text-align:right;color:var(--danger);font-weight:600">${rp(o.sisa)}</td>
+      <td>${st}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="o-wrap">
+    <div class="o-head"><h2 class="o-title">Piutang Buyer</h2></div>
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Order yang belum lunas (sisa &gt; 0). Klik order untuk catat pembayaran. Piutang = Nilai jual − pembayaran diterima.</p>
+    <div class="o-card" style="padding:0;overflow:hidden">
+      <table class="o-table">
+        <thead><tr><th>No order</th><th>Buyer</th><th style="text-align:right">Nilai jual</th><th style="text-align:right">Dibayar</th><th style="text-align:right">Sisa piutang</th><th>Status</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="6" class="o-empty">Tidak ada piutang. Semua order lunas 🎉</td></tr>`}</tbody>
+      </table>
+      ${list.length?`<div style="padding:12px 14px;text-align:right;border-top:1px solid var(--paper-line);font-size:14px">Total piutang: <b style="color:var(--danger)">${rp(total)}</b></div>`:''}
+    </div>
+  </div>`;
+}
+function bindPiutangBuyer(){
+  document.querySelectorAll('.o-row').forEach(r=>r.onclick=()=>{ openOrderId=r.dataset.open; orderView='card'; activeTab='daftar_order'; sampleFormOpen=false; poFormOpen=false; buyerPayFormOpen=false; render(); });
 }
 
 // ===== PO keluar + Supplier (Langkah 7) =====
@@ -2359,6 +2394,7 @@ function render(){
   if(activeTab==='tagihan'){ c.innerHTML=viewTagihanModule(); bindTagihan(); return; }
   if(activeTab==='pembayaran'){ c.innerHTML=viewPembayaranModule(); bindPembayaran(); return; }
   if(activeTab==='pengiriman'){ c.innerHTML=viewShipModule(); bindShipTab(); return; }
+  if(activeTab==='piutang_buyer'){ c.innerHTML=viewPiutangBuyer(); bindPiutangBuyer(); return; }
   if(activeTab==='doc_jual'){ c.innerHTML=viewPenjualanLink(); bindPenjualanLink(); return; }
   if(!views[activeTab]){ c.innerHTML=viewPlaceholder(activeTab); return; }
   if(state.buyers.length===0 && activeTab!=='modal' && activeTab!=='ringkasan' && activeTab!=='report'){
@@ -2859,7 +2895,7 @@ function viewPenjualanLink(){
 function viewPenjualanDetail(o){
   return `<div class="o-wrap">
     <div class="o-head">
-      <div><button class="o-btn ghost" id="pjBack">← Riwayat Sample</button></div>
+      <div><button class="o-btn ghost" id="pjBack">← Order History</button></div>
       <div>${statusBadge(o.status)}</div>
     </div>
     <div class="o-card">
