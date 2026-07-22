@@ -453,7 +453,7 @@ const NAV = [
   ]},
   {id:'nav_piutang', label:'Piutang', icon:'coin', children:[
     {id:'piutang_buyer', label:'Piutang Buyer', roles:['owner','keuangan','sales']},
-    {id:'piutang',       label:'Rekap Piutang', roles:['owner','keuangan']},
+    {id:'pembelian',     label:'Pembelian',     roles:['owner','keuangan','staff']},
   ]},
   {id:'nav_keuangan', label:'Keuangan', icon:'wallet', children:[
     {id:'modal',      label:'Modal',            roles:['owner','keuangan']},
@@ -745,6 +745,7 @@ function viewPlaceholder(tabId){
 // ================= MODUL ORDER (Langkah 5) =================
 let currentUserId = null;
 let orderView = 'list';       // 'list' | 'card' | 'new'
+let showArchived = false;      // Daftar Order: tampilkan order yang disembunyikan
 let openOrderId = null;
 let ordersCache = null;
 let buyersCache = null;
@@ -875,7 +876,7 @@ async function loadOrders(){
   const { data:bs } = await sb.from('buyers').select('id,nama').order('nama');
   buyersCache = bs||[];
   const { data:os, error } = await sb.from('orders')
-    .select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,po_masuk_no')
+    .select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,items_sample,po_masuk_no,arsip')
     .order('created_at',{ascending:false});
   if(error) console.error('load orders', error);
   const bmap={}; buyersCache.forEach(b=>bmap[b.id]=b.nama);
@@ -897,7 +898,10 @@ function viewOrderModule(){
 }
 
 function viewOrderList(){
-  const rows=ordersCache.map(o=>{
+  const all=ordersCache||[];
+  const list=all.filter(o=> showArchived ? o.arsip : !o.arsip);
+  const archivedCount=all.filter(o=>o.arsip).length;
+  const rows=list.map(o=>{
     const piut=(Number(o.nilai_jual)||0)-(Number(o.total_bayar_buyer)||0);
     return `<tr class="o-row" data-open="${o.id}">
       <td style="font-weight:600;color:var(--tea-dark)">${o.no_order}</td>
@@ -905,15 +909,19 @@ function viewOrderList(){
       <td>${statusBadge(o.status)}</td>
       <td style="text-align:right">${rp(o.nilai_jual)}</td>
       <td style="text-align:right">${piut>0?rp(piut):'<span style="color:#1D6B4F">Lunas</span>'}</td>
+      <td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-arsip="${o.id}" data-val="${o.arsip?0:1}" style="padding:4px 9px">${o.arsip?'Tampilkan':'Sembunyikan'}</button></td>
     </tr>`;
   }).join('');
   return `<div class="o-wrap">
-    <div class="o-head"><h2 class="o-title">Daftar Order</h2>
-      <button class="o-btn" id="oNew">+ Order baru</button></div>
+    <div class="o-head"><h2 class="o-title">Daftar Order${showArchived?' — Disembunyikan':''}</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="o-btn ghost" id="oToggleArsip">${showArchived?'← Order aktif':`Lihat yang disembunyikan${archivedCount?` (${archivedCount})`:''}`}</button>
+        ${showArchived?'':'<button class="o-btn" id="oNew">+ Order baru</button>'}
+      </div></div>
     <div class="o-card" style="padding:0;overflow:hidden">
       <table class="o-table">
-        <thead><tr><th>No order</th><th>Buyer</th><th>Status</th><th style="text-align:right">Nilai jual</th><th style="text-align:right">Sisa piutang</th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="5" class="o-empty">Belum ada order. Klik "+ Order baru" untuk mulai.</td></tr>`}</tbody>
+        <thead><tr><th>No order</th><th>Buyer</th><th>Status</th><th style="text-align:right">Nilai jual</th><th style="text-align:right">Sisa piutang</th><th></th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="6" class="o-empty">${showArchived?'Tidak ada order yang disembunyikan.':'Belum ada order. Klik "+ Order baru" untuk mulai.'}</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
@@ -1019,6 +1027,7 @@ function viewOrderCard(){
       <p style="margin:10px 0 0;color:var(--ink-soft);font-size:12px">Pembayaran buyer (DP &amp; pelunasan) dicatat di kartu ini (bawah). Tagihan supplier ada di menu <b>Tagihan Supplier</b>.</p>
     </div>
     ${itemsDisplayCard('Item order', o.items)}
+    ${(o.items_sample&&o.items_sample.length)?itemsDisplayCard('Histori item (dari sample)', o.items_sample):''}
     ${sampleViewRO(o)}
     ${talNote}
     ${poSection(o)}
@@ -1029,6 +1038,8 @@ function viewOrderCard(){
 function bindOrderModule(){
   if(orderView==='list'){
     const nb=document.getElementById('oNew'); if(nb) nb.onclick=()=>{ orderView='new'; render(); };
+    const tg=document.getElementById('oToggleArsip'); if(tg) tg.onclick=()=>{ showArchived=!showArchived; render(); };
+    document.querySelectorAll('[data-arsip]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); archiveOrder(b.dataset.arsip, Number(b.dataset.val)); });
     document.querySelectorAll('.o-row').forEach(r=>r.onclick=()=>{ openOrderId=r.dataset.open; orderView='card'; sampleFormOpen=false; poFormOpen=false; buyerPayFormOpen=false; render(); });
   } else if(orderView==='new'){
     const bsel=document.getElementById('oBuyer');
@@ -1086,6 +1097,12 @@ function bindOrderModule(){
     bindBuyerPayForm();
   }
   bindItemEditor();
+}
+async function archiveOrder(id, val){
+  const { error }=await sb.from('orders').update({ arsip: !!val }).eq('id',id);
+  if(error){ alert('Gagal: '+error.message); return; }
+  const o=(ordersCache||[]).find(x=>x.id===id); if(o) o.arsip=!!val;
+  render();
 }
 async function deleteOrder(){
   const o=ordersCache.find(x=>x.id===openOrderId);
@@ -1180,7 +1197,10 @@ async function saveNewOrder(){
   // Lanjutan dari sample → ubah order sample yang sama jadi PO (histori & nilai sample tetap)
   const fromSampleId=(document.getElementById('oFromSample')||{}).value||'';
   if(fromSampleId){
-    const { error }=await sb.from('orders').update({ status:'po', nilai_jual:nilai, po_masuk_no:poMasuk, items, catatan:cat }).eq('id',fromSampleId);
+    // simpan item tahap sample sebagai histori sebelum item ditimpa item PO
+    const sampleOrder=(ordersCache||[]).find(x=>x.id===fromSampleId);
+    const items_sample=(sampleOrder&&Array.isArray(sampleOrder.items)&&sampleOrder.items.length)?sampleOrder.items:(sampleOrder?sampleOrder.items_sample:null)||[];
+    const { error }=await sb.from('orders').update({ status:'po', nilai_jual:nilai, po_masuk_no:poMasuk, items, items_sample, catatan:cat }).eq('id',fromSampleId);
     if(error){ err.textContent='Gagal simpan: '+error.message; reset(); return; }
     delete orderSummary[fromSampleId]; ordersCache=null; orderView='list'; orderFinance=null; sampleDocIds=null; render();
     return;
@@ -1307,6 +1327,7 @@ function sampleRowsHTML(list){
       <td>${o.buyer_name}</td>
       <td style="color:var(--ink-soft);font-size:12px">${esc(itemSummary(o.items))||'—'}</td>
       <td style="text-align:right">${rp(o.nilai_sample)}</td>
+      <td style="text-align:right">${Number(o.nilai_jual)>0?rp(o.nilai_jual):'—'}</td>
       <td>${statusBadge(o.status)}</td>
     </tr>`).join('');
 }
@@ -1318,8 +1339,8 @@ function viewSampleTab(){
   const riwayat=ordersCache.filter(o=>o.status!=='sample' && o.status!=='batal' && hadSample(o));
   const tbl=(rows,empty)=>`<div class="o-card" style="padding:0;overflow:hidden">
       <table class="o-table">
-        <thead><tr><th>No order</th><th>Buyer</th><th>Jenis teh</th><th style="text-align:right">Nilai sample</th><th>Status</th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="5" class="o-empty">${empty}</td></tr>`}</tbody>
+        <thead><tr><th>No order</th><th>Buyer</th><th>Jenis teh</th><th style="text-align:right">Nilai sample</th><th style="text-align:right">Nilai PO</th><th>Status</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="6" class="o-empty">${empty}</td></tr>`}</tbody>
       </table>
     </div>`;
   return `<div class="o-wrap">
@@ -1369,6 +1390,52 @@ function viewPiutangBuyer(){
 function bindPiutangBuyer(){
   document.querySelectorAll('.o-row').forEach(r=>r.onclick=()=>{ openOrderId=r.dataset.open; orderView='card'; activeTab='daftar_order'; sampleFormOpen=false; poFormOpen=false; buyerPayFormOpen=false; render(); });
 }
+
+// ===== Pembelian (dari supplier_bills): untuk order buyer (HPP) + umum (RnB/operasional) =====
+function viewPembelian(){
+  if(billsCache===null){ if(!billLoading) loadBills(); return `<div class="o-card">Memuat…</div>`; }
+  const bmap={}; (ordersCache||[]).forEach(o=>bmap[o.id]=o.buyer_name);
+  const forPO=billsCache.filter(b=>b.jenis==='pemenuhan_po');
+  const umum=billsCache.filter(b=>b.jenis!=='pemenuhan_po');
+  const totPO=forPO.reduce((s,b)=>s+(Number(b.nilai)||0),0);
+  const totUmum=umum.reduce((s,b)=>s+(Number(b.nilai)||0),0);
+  const itemLine=b=>b.items&&b.items.length?`<div style="font-weight:400;font-size:11px;color:var(--ink-soft)">${esc(itemSummary(b.items))}</div>`:'';
+  const rowsPO=forPO.map(b=>`<tr>
+    <td style="font-weight:600;color:var(--tea-dark)">${esc(b.no_tagihan||'-')}${itemLine(b)}</td>
+    <td>${esc(bmap[b.order_id]||'—')}</td>
+    <td>${esc(b.order_no||'—')}</td>
+    <td>${esc(b.supplier_name||'—')}</td>
+    <td style="text-align:right">${rp(b.nilai)}</td>
+    <td>${billStatusBadge(b)}</td>
+  </tr>`).join('');
+  const rowsUmum=umum.map(b=>`<tr>
+    <td style="font-weight:600;color:var(--tea-dark)">${esc(b.no_tagihan||'-')}${itemLine(b)}</td>
+    <td>${esc(b.supplier_name||'—')}</td>
+    <td style="text-align:right">${rp(b.nilai)}</td>
+    <td>${billStatusBadge(b)}</td>
+  </tr>`).join('');
+  return `<div class="o-wrap">
+    <div class="o-head"><h2 class="o-title">Pembelian</h2></div>
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Catatan pembelian, dikelompokkan: untuk memenuhi order buyer (masuk HPP) vs pembelian umum (RnB/operasional → biaya usaha). Tambah/edit di menu <b>Tagihan Supplier</b>.</p>
+    <p style="margin:0 0 8px;font-weight:600;color:var(--ink)">Pembelian untuk order buyer (HPP)</p>
+    <div class="o-card" style="padding:0;overflow:hidden">
+      <table class="o-table">
+        <thead><tr><th>No / item</th><th>Buyer</th><th>Order</th><th>Supplier</th><th style="text-align:right">Nilai</th><th>Status</th></tr></thead>
+        <tbody>${rowsPO||`<tr><td colspan="6" class="o-empty">Belum ada pembelian untuk order.</td></tr>`}</tbody>
+      </table>
+      ${forPO.length?`<div style="padding:10px 14px;text-align:right;border-top:1px solid var(--paper-line)">Total: <b>${rp(totPO)}</b></div>`:''}
+    </div>
+    <p style="margin:16px 0 8px;font-weight:600;color:var(--ink)">Pembelian umum (RnB / operasional)</p>
+    <div class="o-card" style="padding:0;overflow:hidden">
+      <table class="o-table">
+        <thead><tr><th>No / item</th><th>Supplier</th><th style="text-align:right">Nilai</th><th>Status</th></tr></thead>
+        <tbody>${rowsUmum||`<tr><td colspan="4" class="o-empty">Belum ada pembelian umum.</td></tr>`}</tbody>
+      </table>
+      ${umum.length?`<div style="padding:10px 14px;text-align:right;border-top:1px solid var(--paper-line)">Total: <b>${rp(totUmum)}</b></div>`:''}
+    </div>
+  </div>`;
+}
+function bindPembelian(){}
 
 // ===== PO keluar + Supplier (Langkah 7) =====
 async function resolveSupplierId(name){
@@ -2395,6 +2462,7 @@ function render(){
   if(activeTab==='pembayaran'){ c.innerHTML=viewPembayaranModule(); bindPembayaran(); return; }
   if(activeTab==='pengiriman'){ c.innerHTML=viewShipModule(); bindShipTab(); return; }
   if(activeTab==='piutang_buyer'){ c.innerHTML=viewPiutangBuyer(); bindPiutangBuyer(); return; }
+  if(activeTab==='pembelian'){ c.innerHTML=viewPembelian(); bindPembelian(); return; }
   if(activeTab==='doc_jual'){ c.innerHTML=viewPenjualanLink(); bindPenjualanLink(); return; }
   if(!views[activeTab]){ c.innerHTML=viewPlaceholder(activeTab); return; }
   if(state.buyers.length===0 && activeTab!=='modal' && activeTab!=='ringkasan' && activeTab!=='report'){
