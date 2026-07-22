@@ -745,7 +745,7 @@ function viewPlaceholder(tabId){
 // ================= MODUL ORDER (Langkah 5) =================
 let currentUserId = null;
 let orderView = 'list';       // 'list' | 'card' | 'new'
-let showArchived = false;      // Daftar Order: tampilkan order yang disembunyikan
+let hideDone = false;          // Daftar Order: toggle sembunyikan order selesai (lunas/batal)
 let openOrderId = null;
 let ordersCache = null;
 let buyersCache = null;
@@ -765,6 +765,8 @@ let editPOId = null;
 const PO_STATUS = [['belum','Belum bayar'],['sebagian','Sebagian'],['lunas','Lunas']];
 let billsCache = null;
 let billView = 'list';
+let pembelianFormOpen = false;
+let pembelianJenis = 'pemenuhan_po'; // default form Pembelian
 let billLoading = false;
 let payingBillId = null;
 let editBillId = null;
@@ -876,7 +878,7 @@ async function loadOrders(){
   const { data:bs } = await sb.from('buyers').select('id,nama').order('nama');
   buyersCache = bs||[];
   const { data:os, error } = await sb.from('orders')
-    .select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,items_sample,po_masuk_no,arsip')
+    .select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,items_sample,po_masuk_no')
     .order('created_at',{ascending:false});
   if(error) console.error('load orders', error);
   const bmap={}; buyersCache.forEach(b=>bmap[b.id]=b.nama);
@@ -899,8 +901,9 @@ function viewOrderModule(){
 
 function viewOrderList(){
   const all=ordersCache||[];
-  const list=all.filter(o=> showArchived ? o.arsip : !o.arsip);
-  const archivedCount=all.filter(o=>o.arsip).length;
+  const isDone=o=>o.status==='lunas'||o.status==='batal';
+  const list = hideDone ? all.filter(o=>!isDone(o)) : all;
+  const doneCount=all.filter(isDone).length;
   const rows=list.map(o=>{
     const piut=(Number(o.nilai_jual)||0)-(Number(o.total_bayar_buyer)||0);
     return `<tr class="o-row" data-open="${o.id}">
@@ -909,19 +912,18 @@ function viewOrderList(){
       <td>${statusBadge(o.status)}</td>
       <td style="text-align:right">${rp(o.nilai_jual)}</td>
       <td style="text-align:right">${piut>0?rp(piut):'<span style="color:#1D6B4F">Lunas</span>'}</td>
-      <td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-arsip="${o.id}" data-val="${o.arsip?0:1}" style="padding:4px 9px">${o.arsip?'Tampilkan':'Sembunyikan'}</button></td>
     </tr>`;
   }).join('');
   return `<div class="o-wrap">
-    <div class="o-head"><h2 class="o-title">Daftar Order${showArchived?' — Disembunyikan':''}</h2>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="o-btn ghost" id="oToggleArsip">${showArchived?'← Order aktif':`Lihat yang disembunyikan${archivedCount?` (${archivedCount})`:''}`}</button>
-        ${showArchived?'':'<button class="o-btn" id="oNew">+ Order baru</button>'}
+    <div class="o-head"><h2 class="o-title">Daftar Order</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button class="o-btn ghost" id="oToggleDone" title="Tampilkan / sembunyikan order yang lunas &amp; batal">${hideDone?`Show selesai${doneCount?` (${doneCount})`:''}`:'Hide selesai'}</button>
+        <button class="o-btn" id="oNew">+ Order baru</button>
       </div></div>
     <div class="o-card" style="padding:0;overflow:hidden">
       <table class="o-table">
-        <thead><tr><th>No order</th><th>Buyer</th><th>Status</th><th style="text-align:right">Nilai jual</th><th style="text-align:right">Sisa piutang</th><th></th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="6" class="o-empty">${showArchived?'Tidak ada order yang disembunyikan.':'Belum ada order. Klik "+ Order baru" untuk mulai.'}</td></tr>`}</tbody>
+        <thead><tr><th>No order</th><th>Buyer</th><th>Status</th><th style="text-align:right">Nilai jual</th><th style="text-align:right">Sisa piutang</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="5" class="o-empty">${hideDone&&all.length?'Semua order sudah selesai — klik "Show selesai".':'Belum ada order. Klik "+ Order baru" untuk mulai.'}</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
@@ -1038,8 +1040,7 @@ function viewOrderCard(){
 function bindOrderModule(){
   if(orderView==='list'){
     const nb=document.getElementById('oNew'); if(nb) nb.onclick=()=>{ orderView='new'; render(); };
-    const tg=document.getElementById('oToggleArsip'); if(tg) tg.onclick=()=>{ showArchived=!showArchived; render(); };
-    document.querySelectorAll('[data-arsip]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); archiveOrder(b.dataset.arsip, Number(b.dataset.val)); });
+    const tg=document.getElementById('oToggleDone'); if(tg) tg.onclick=()=>{ hideDone=!hideDone; render(); };
     document.querySelectorAll('.o-row').forEach(r=>r.onclick=()=>{ openOrderId=r.dataset.open; orderView='card'; sampleFormOpen=false; poFormOpen=false; buyerPayFormOpen=false; render(); });
   } else if(orderView==='new'){
     const bsel=document.getElementById('oBuyer');
@@ -1097,12 +1098,6 @@ function bindOrderModule(){
     bindBuyerPayForm();
   }
   bindItemEditor();
-}
-async function archiveOrder(id, val){
-  const { error }=await sb.from('orders').update({ arsip: !!val }).eq('id',id);
-  if(error){ alert('Gagal: '+error.message); return; }
-  const o=(ordersCache||[]).find(x=>x.id===id); if(o) o.arsip=!!val;
-  render();
 }
 async function deleteOrder(){
   const o=ordersCache.find(x=>x.id===openOrderId);
@@ -1392,7 +1387,62 @@ function bindPiutangBuyer(){
 }
 
 // ===== Pembelian (dari supplier_bills): untuk order buyer (HPP) + umum (RnB/operasional) =====
+function viewPembelianForm(){
+  const oopts=(ordersCache||[]).map(o=>`<option value="${o.id}">${esc(o.no_order)} · ${esc(o.buyer_name)}</option>`).join('');
+  const sopts=(suppliersCache||[]).map(s=>`<option value="${s.id}">${esc(s.nama)}</option>`).join('');
+  const jopts=BILL_JENIS.map(j=>`<option value="${j[0]}" ${j[0]===pembelianJenis?'selected':''}>${j[1]}</option>`).join('');
+  return `<div class="o-wrap" style="max-width:560px">
+    <div class="o-head"><h2 class="o-title">Pembelian baru</h2></div>
+    <div class="o-card">
+      <label class="o-field" style="margin-top:0">Jenis pembelian</label>
+      <select class="o-input" id="pbJenis">${jopts}</select>
+      <div id="pbOrderWrap" style="display:${pembelianJenis==='pemenuhan_po'?'block':'none'}">
+        <label class="o-field">Untuk order buyer</label>
+        <select class="o-input" id="pbOrder"><option value="">— pilih order —</option>${oopts}</select>
+      </div>
+      <label class="o-field">Supplier</label>
+      <select class="o-input" id="pbSupplier"><option value="">— pilih supplier —</option>${sopts}<option value="__new">+ Supplier baru…</option></select>
+      <div id="pbSupplierNewWrap" style="display:none"><label class="o-field">Nama supplier baru</label><input class="o-input" id="pbSupplierNew" placeholder="mis. Kebun Ciwidey / Toko RnB"></div>
+      ${itemEditorHTML([])}
+      <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
+        <div><label class="o-field">No nota / invoice supplier</label><input class="o-input" id="pbNo" placeholder="opsional"></div>
+        <div><label class="o-field">Nilai (Rp)</label><input class="o-input" id="pbNilai" type="number" inputmode="numeric" placeholder="otomatis dari item"></div>
+      </div>
+      <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
+        <div><label class="o-field">Tanggal</label><input class="o-input" id="pbTerima" type="date" value="${today()}"></div>
+        <div><label class="o-field">Jatuh tempo bayar</label><input class="o-input" id="pbTempo" type="date"></div>
+      </div>
+      <div id="pbErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:8px"></div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <button class="o-btn" id="pbSave">Simpan pembelian</button>
+        <button class="o-btn ghost" id="pbCancel">Batal</button>
+      </div>
+    </div>
+  </div>`;
+}
+async function savePembelian(){
+  const err=document.getElementById('pbErr'); if(err) err.textContent='';
+  const jenis=document.getElementById('pbJenis').value||'pemenuhan_po';
+  const order_id = jenis==='pemenuhan_po' ? (document.getElementById('pbOrder').value||null) : null;
+  const ssel=document.getElementById('pbSupplier').value;
+  const snewEl=document.getElementById('pbSupplierNew'); const snew=snewEl?snewEl.value.trim():'';
+  const no=document.getElementById('pbNo').value.trim();
+  const items=collectItems();
+  const nilai=items.length?computeItemTotals(items).total:(Number(document.getElementById('pbNilai').value)||0);
+  const terima=document.getElementById('pbTerima').value||today();
+  const tempo=document.getElementById('pbTempo').value||null;
+  const btn=document.getElementById('pbSave'); btn.disabled=true; btn.textContent='Menyimpan…';
+  const reset=()=>{ btn.disabled=false; btn.textContent='Simpan pembelian'; };
+  let supplier_id=null;
+  if(ssel==='__new'){ if(!snew){ if(err) err.textContent='Isi nama supplier baru.'; reset(); return; } const r=await resolveSupplierId(snew); if(r.error){ if(err) err.textContent='Gagal simpan supplier: '+r.error; reset(); return; } supplier_id=r.id; }
+  else if(ssel){ supplier_id=ssel; } else { if(err) err.textContent='Pilih supplier.'; reset(); return; }
+  if(nilai<=0){ if(err) err.textContent='Nilai harus lebih dari 0 (isi item atau nilai).'; reset(); return; }
+  const { error }=await sb.from('supplier_bills').insert({ no_tagihan:no, order_id, supplier_id, nilai, items, tanggal_terima:terima, jatuh_tempo:tempo, jenis, status:'belum' });
+  if(error){ if(err) err.textContent='Gagal simpan: '+error.message; reset(); return; }
+  orderSummary={}; billsCache=null; orderFinance=null; pembelianFormOpen=false; render();
+}
 function viewPembelian(){
+  if(pembelianFormOpen) return viewPembelianForm();
   if(billsCache===null){ if(!billLoading) loadBills(); return `<div class="o-card">Memuat…</div>`; }
   const bmap={}; (ordersCache||[]).forEach(o=>bmap[o.id]=o.buyer_name);
   const forPO=billsCache.filter(b=>b.jenis==='pemenuhan_po');
@@ -1415,8 +1465,8 @@ function viewPembelian(){
     <td>${billStatusBadge(b)}</td>
   </tr>`).join('');
   return `<div class="o-wrap">
-    <div class="o-head"><h2 class="o-title">Pembelian</h2></div>
-    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Catatan pembelian, dikelompokkan: untuk memenuhi order buyer (masuk HPP) vs pembelian umum (RnB/operasional → biaya usaha). Tambah/edit di menu <b>Tagihan Supplier</b>.</p>
+    <div class="o-head"><h2 class="o-title">Pembelian</h2><button class="o-btn" id="pbNew">+ Pembelian</button></div>
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Catatan pembelian, dikelompokkan: untuk memenuhi order buyer (masuk HPP) vs pembelian umum (RnB/operasional → biaya usaha).</p>
     <p style="margin:0 0 8px;font-weight:600;color:var(--ink)">Pembelian untuk order buyer (HPP)</p>
     <div class="o-card" style="padding:0;overflow:hidden">
       <table class="o-table">
@@ -1435,7 +1485,14 @@ function viewPembelian(){
     </div>
   </div>`;
 }
-function bindPembelian(){}
+function bindPembelian(){
+  const nb=document.getElementById('pbNew'); if(nb) nb.onclick=()=>{ pembelianFormOpen=true; render(); };
+  const jn=document.getElementById('pbJenis'); if(jn) jn.onchange=()=>{ pembelianJenis=jn.value; const w=document.getElementById('pbOrderWrap'); if(w) w.style.display=jn.value==='pemenuhan_po'?'block':'none'; };
+  const bs=document.getElementById('pbSupplier'); if(bs) bs.onchange=()=>{ const w=document.getElementById('pbSupplierNewWrap'); if(w) w.style.display=bs.value==='__new'?'block':'none'; };
+  const sv=document.getElementById('pbSave'); if(sv) sv.onclick=savePembelian;
+  const cx=document.getElementById('pbCancel'); if(cx) cx.onclick=()=>{ pembelianFormOpen=false; render(); };
+  bindItemEditor();
+}
 
 // ===== PO keluar + Supplier (Langkah 7) =====
 async function resolveSupplierId(name){

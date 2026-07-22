@@ -29,10 +29,6 @@ alter table public.shipment_items
 alter table public.orders
   add column if not exists items_sample jsonb default '[]'::jsonb;
 
--- [12] Sembunyikan/arsip order dari Daftar Order (data tidak dihapus)
-alter table public.orders
-  add column if not exists arsip boolean default false;
-
 -- [08] Hapus order beserta SEMUA data terkait (atomik)
 create or replace function public.delete_order_cascade(p_order uuid)
 returns void
