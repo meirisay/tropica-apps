@@ -1494,6 +1494,98 @@ function bindPembelian(){
   bindItemEditor();
 }
 
+// ===== Modal: setoran modal + investor & bagi hasil =====
+let investorsCache=null, modalSetoranCache=null, bagiHasilCache=null;
+async function loadModal(){
+  try{
+    const inv=await sb.from('investors').select('*').order('nama');
+    const set=await sb.from('modal_setoran').select('*').order('tanggal');
+    const bh=await sb.from('bagi_hasil').select('*,investors(nama)').order('tanggal',{ascending:false});
+    investorsCache=inv.data||[]; modalSetoranCache=set.data||[];
+    bagiHasilCache=(bh.data||[]).map(x=>({...x, investor_nama:x.investors?x.investors.nama:'—'}));
+  }catch(e){ investorsCache=investorsCache||[]; modalSetoranCache=modalSetoranCache||[]; bagiHasilCache=bagiHasilCache||[]; }
+  render();
+}
+function investorTipeLabel(t){ return t==='pemilik'?'Pemilik':(t==='tetap'?'Investor tetap':'Sesekali'); }
+function invName(id){ const i=(investorsCache||[]).find(x=>x.id===id); return i?i.nama:'—'; }
+function viewModalModule(){
+  if(investorsCache===null){ loadModal(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
+  const inv=investorsCache, setoran=modalSetoranCache, bh=bagiHasilCache;
+  const totalSetoran=setoran.reduce((s,x)=>s+(Number(x.jumlah)||0),0);
+  const totalBagiHasil=bh.reduce((s,x)=>s+(Number(x.jumlah)||0),0);
+  const labaTotal = orderFinance ? Number(orderFinance.laba)||0 : null;
+  const labaOwner = (labaTotal!=null?labaTotal:0) - totalBagiHasil;
+  const posisiModal = totalSetoran + labaOwner;
+  // Section 1: setoran
+  const setoranRows=setoran.map(x=>`<tr>
+    <td style="font-weight:600;color:var(--tea-dark)">${esc(x.nama||invName(x.investor_id))}</td>
+    <td>${x.tanggal?fmtLong(x.tanggal):'-'}</td>
+    <td style="color:var(--ink-soft);font-size:12px">${esc(x.catatan||'')}</td>
+    <td style="text-align:right">${rp(x.jumlah)}</td>
+  </tr>`).join('');
+  // Section 2a: investor list with computed total dibagikan
+  const dibagikanBy={}; bh.forEach(x=>{ dibagikanBy[x.investor_id]=(dibagikanBy[x.investor_id]||0)+(Number(x.jumlah)||0); });
+  const invRows=inv.map(i=>`<tr>
+    <td style="font-weight:600;color:var(--tea-dark)">${esc(i.nama)}</td>
+    <td>${investorTipeLabel(i.tipe)}</td>
+    <td style="text-align:right">${i.persen!=null&&i.persen!==''?esc(i.persen)+'%':(i.tipe==='pemilik'?'sisa laba':'per-kasus')}</td>
+    <td style="text-align:right">${rp(dibagikanBy[i.id]||0)}</td>
+  </tr>`).join('');
+  // Section 2b: bagi hasil entries
+  const bhRows=bh.map(x=>`<tr>
+    <td>${esc(x.investor_nama||invName(x.investor_id))}</td>
+    <td>${esc(x.order_no||'-')}</td>
+    <td style="color:var(--ink-soft);font-size:12px">${esc(x.dasar||'')}${x.catatan?` · ${esc(x.catatan)}`:''}</td>
+    <td>${x.tanggal?fmtLong(x.tanggal):'-'}</td>
+    <td style="text-align:right">${rp(x.jumlah)}</td>
+  </tr>`).join('');
+  const kv=(l,v,color)=>`<tr><td>${l}</td><td style="text-align:right${color?`;color:${color}`:''}">${rp(v)}</td></tr>`;
+  return `<div class="o-wrap">
+    <div class="o-head"><h2 class="o-title">Modal</h2></div>
+
+    <p style="margin:0 0 8px;font-weight:600;color:var(--ink)">1 · Setoran Modal <span style="font-weight:400;color:var(--ink-soft);font-size:12px">(uang pemilik &amp; investor)</span></p>
+    <div class="o-card" style="padding:0;overflow:hidden">
+      <table class="o-table">
+        <thead><tr><th>Nama</th><th>Tanggal</th><th>Catatan</th><th style="text-align:right">Jumlah</th></tr></thead>
+        <tbody>${setoranRows||`<tr><td colspan="4" class="o-empty">Belum ada setoran modal.</td></tr>`}</tbody>
+      </table>
+      <div style="padding:10px 14px;text-align:right;border-top:1px solid var(--paper-line)">Total modal disetor: <b>${rp(totalSetoran)}</b></div>
+    </div>
+    <button class="o-btn ghost" id="mdAddSetoran" style="margin-top:8px">+ Tambah setoran</button>
+
+    <p style="margin:20px 0 8px;font-weight:600;color:var(--ink)">2 · Investor &amp; Bagi Hasil</p>
+    <div class="o-card" style="padding:0;overflow:hidden">
+      <table class="o-table">
+        <thead><tr><th>Investor</th><th>Tipe</th><th style="text-align:right">Porsi</th><th style="text-align:right">Sudah dibagikan</th></tr></thead>
+        <tbody>${invRows||`<tr><td colspan="4" class="o-empty">Belum ada investor.</td></tr>`}</tbody>
+      </table>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:8px"><button class="o-btn ghost" id="mdAddInvestor">+ Investor</button><button class="o-btn ghost" id="mdAddBagi">+ Catat bagi hasil</button></div>
+    <div class="o-card" style="padding:0;overflow:hidden;margin-top:10px">
+      <table class="o-table">
+        <thead><tr><th>Investor</th><th>Order/PO</th><th>Dasar</th><th>Tanggal</th><th style="text-align:right">Jumlah</th></tr></thead>
+        <tbody>${bhRows||`<tr><td colspan="5" class="o-empty">Belum ada bagi hasil dicatat.</td></tr>`}</tbody>
+      </table>
+      <div style="padding:10px 14px;text-align:right;border-top:1px solid var(--paper-line)">Total dibagikan ke investor: <b>${rp(totalBagiHasil)}</b></div>
+    </div>
+
+    <p style="margin:20px 0 8px;font-weight:600;color:var(--ink)">3 · Ringkasan Modal</p>
+    <div class="o-card">
+      <table class="o-kv">
+        ${kv('Total setoran modal', totalSetoran)}
+        ${kv('Laba usaha (dari order)', labaTotal!=null?labaTotal:0)}
+        ${kv('− Bagi hasil investor', totalBagiHasil, 'var(--danger)')}
+        ${kv('Laba ditahan (bagian owner)', labaOwner, '#1D6B4F')}
+        <tr style="border-top:2px solid var(--paper-line)"><td style="font-weight:700">Posisi modal sekarang</td><td style="text-align:right;font-weight:700">${rp(posisiModal)}</td></tr>
+      </table>
+      ${labaTotal==null?`<p style="margin:8px 0 0;color:var(--ink-soft);font-size:11px">Laba usaha diambil dari Laporan (order). Buka menu Laporan sekali agar terisi.</p>`:''}
+    </div>
+  </div>`;
+}
+function bindModalModule(){
+  // form input menyusul setelah layout disetujui
+}
+
 // ===== PO keluar + Supplier (Langkah 7) =====
 async function resolveSupplierId(name){
   const found=(suppliersCache||[]).find(s=>(s.nama||'').toLowerCase()===name.toLowerCase());
@@ -2520,6 +2612,7 @@ function render(){
   if(activeTab==='pengiriman'){ c.innerHTML=viewShipModule(); bindShipTab(); return; }
   if(activeTab==='piutang_buyer'){ c.innerHTML=viewPiutangBuyer(); bindPiutangBuyer(); return; }
   if(activeTab==='pembelian'){ c.innerHTML=viewPembelian(); bindPembelian(); return; }
+  if(activeTab==='modal'){ c.innerHTML=viewModalModule(); bindModalModule(); return; }
   if(activeTab==='doc_jual'){ c.innerHTML=viewPenjualanLink(); bindPenjualanLink(); return; }
   if(!views[activeTab]){ c.innerHTML=viewPlaceholder(activeTab); return; }
   if(state.buyers.length===0 && activeTab!=='modal' && activeTab!=='ringkasan' && activeTab!=='report'){
