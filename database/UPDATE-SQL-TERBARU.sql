@@ -138,4 +138,17 @@ create policy p_pinjaman_read on public.pinjaman for select to authenticated
 create policy p_pinjaman_write on public.pinjaman for all to authenticated
   using (public.my_role() in ('owner','keuangan')) with check (public.my_role() in ('owner','keuangan'));
 
+-- [14] PO Keluar: opsi VAT/PPN per PO (supplier ber-PPN vs tanpa PPN)
+alter table public.purchase_orders
+  add column if not exists pakai_ppn boolean default true;
+
+-- [15] FIX: kolom item pada tagihan/pembelian supplier (menyimpan Pembelian gagal tanpa ini)
+alter table public.supplier_bills
+  add column if not exists items jsonb default '[]'::jsonb;
+
+-- [16] Opsi VAT/PPN pada tagihan supplier, dokumen penjualan (PI/Invoice), & order
+alter table public.supplier_bills add column if not exists pakai_ppn boolean default true;
+alter table public.order_docs    add column if not exists pakai_ppn boolean default true;
+alter table public.orders        add column if not exists pakai_ppn boolean default true;
+
 -- Selesai. Setelah muncul "Success", buka aplikasi dan uji coba.

@@ -246,6 +246,10 @@
   table.inv-tbl td.t{font-family:'Inter',sans-serif;}
   table.inv-tbl td.c{text-align:center;}
   table.inv-tbl td.r{text-align:right;}
+  table.inv-tbl td.r .m{display:inline-flex;gap:8px;justify-content:flex-end;font-variant-numeric:tabular-nums;font-size:12.5px;}
+  table.inv-tbl td.r .m .n{min-width:112px;text-align:right;}
+  .inv-due .m{display:inline-flex;gap:8px;justify-content:flex-end;font-variant-numeric:tabular-nums;}
+  .inv-due .m .n{min-width:120px;text-align:right;}
   table.inv-tbl tr.sum td{font-weight:600;}
   table.inv-tbl tr.sum td.lbl{text-align:right;font-family:'Inter',sans-serif;font-weight:700;background:#FafafA;}
   table.inv-tbl tr.grand td{font-size:15px;font-weight:700;background:#EDEDED;}
@@ -407,7 +411,7 @@
     <div class="toolbar" id="toolbar">
       <div class="monthbar">
         <select id="monthSelect"></select>
-        <button id="addMonthBtn" type="button">+ Bulan baru</button>
+        <button id="addMonthBtn" type="button" style="display:none">+ Bulan baru</button>
         <span id="addMonthForm" style="display:none;gap:8px;align-items:center;">
           <input id="newMonthName" placeholder="Nama bulan, mis. Juli 2026" style="width:170px;">
           <button id="saveMonthBtn" type="button">Simpan</button>
@@ -510,6 +514,8 @@ const EN_MONTHS=['January','February','March','April','May','June','July','Augus
 function fmtLong(dateStr){ if(!dateStr) return '-'; const d=new Date(dateStr); if(isNaN(d)) return dateStr; return `${d.getDate()} ${EN_MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
 
 function rp(n){ n=Number(n)||0; return 'Rp'+Math.round(n).toLocaleString('id-ID'); }
+// sel uang untuk dokumen cetak: "Rp" rata kiri, angka rata kanan (digit sejajar)
+function mcell(n){ return `<span class="m"><span>Rp</span><span class="n">${Math.round(Number(n)||0).toLocaleString('id-ID')}</span></span>`; }
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,6); }
 function who(){ return document.getElementById('whoName').value.trim() || 'Tanpa nama'; }
 function catLabel(id){ return (CATS.find(c=>c.id===id)||{}).label || '-'; }
@@ -726,8 +732,8 @@ function renderTabs(){
   t.querySelectorAll('[data-tab]').forEach(el=>el.onclick=()=>navTo(el.dataset.tab));
 }
 function updateMonthbar(){
-  const fin=(activeTab==='ringkasan'); // hanya Dashboard yang berbasis bulan; modul keuangan lain (termasuk Laporan) berbasis order
-  ['monthSelect','addMonthBtn','addBuyerBtn','whoName'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display=fin?'':'none'; });
+  const fin=(activeTab==='penjualan'); // Penjualan pakai model buku-kas per-bulan (butuh toolbar bulan + Buyer); modul lain order-based
+  ['monthSelect','addBuyerBtn','whoName'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display=fin?'':'none'; });
   if(!fin){ ['addMonthForm','addBuyerForm'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; }); }
   const tb=document.getElementById('toolbar'); if(tb) tb.style.display=fin?'':'none';
   const pt=document.getElementById('ptitle'); if(pt) pt.textContent=tabLabel(activeTab)||'Ringkasan';
@@ -799,8 +805,10 @@ function statusBadge(s){
 function escAttr(s){ return esc(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
 // ===== Editor rincian item (jenis teh) — dipakai Order, PI Sample, PO keluar =====
-function itemsTotal(items){ return (items||[]).reduce((s,it)=>s+(Number(it.qty)||0)*(Number(it.harga)||0),0); }
-function computeItemTotals(items){ const dpp=itemsTotal(items); const ppn=Math.round(dpp*0.11); return {dpp, ppn, total:dpp+ppn}; }
+function isOngkir(it){ return ((it.satuan||'').toLowerCase()==='ongkir') || ((it.nama||'').toLowerCase()==='ongkir'); }
+function itemsTotal(items){ return (items||[]).filter(it=>!isOngkir(it)).reduce((s,it)=>s+(Number(it.qty)||0)*(Number(it.harga)||0),0); }
+function ongkirTotal(items){ return (items||[]).filter(isOngkir).reduce((s,it)=>s+((Number(it.qty)||1)*(Number(it.harga)||0)),0); }
+function computeItemTotals(items){ const dpp=itemsTotal(items); const ppn=Math.round(dpp*0.11); const ongkir=ongkirTotal(items); return {dpp, ppn, ongkir, total:dpp+ppn+ongkir}; }
 function itemSummary(items){ return (items||[]).map(i=>i.nama).filter(Boolean).join(', '); }
 const ITEM_GRID='1fr 52px 74px 98px 26px';
 const ITEM_GRID_PACK='1fr 48px 62px 96px 84px 24px';
@@ -848,7 +856,12 @@ function collectItems(){
   });
   return out;
 }
-function recalcItemTotal(){ const t=computeItemTotals(collectItems()); const a=document.getElementById('itemDPP'),b=document.getElementById('itemPPN'),c=document.getElementById('itemTotal'); if(a)a.textContent=rp(t.dpp); if(b)b.textContent=rp(t.ppn); if(c)c.textContent=rp(t.total); }
+function orderOngkirVal(){ const el=document.getElementById('oOngkir'); return el?(Number(el.value)||0):0; }
+// Untuk form ORDER: gabungkan item + baris Ongkir (non-PPN) saat menyimpan.
+function itemsWithOngkir(){ const items=collectItems(); const ong=orderOngkirVal(); if(ong>0) items.push({nama:'Ongkir', satuan:'ongkir', qty:1, harga:ong}); return items; }
+function poVatOn(){ const el=document.getElementById('poVat'); return el?(el.dataset.on==='1'):null; } // null = form tanpa toggle
+function vatToggleHTML(on){ const o=(on===false)?'0':'1'; return `<div style="margin-top:6px"><button type="button" class="o-btn ghost" id="poVat" data-on="${o}">PPN 11%: ${o==='1'?'Aktif':'Nonaktif'}</button> <span style="font-size:11px;color:var(--ink-soft);margin-left:8px">Klik untuk ubah (mis. supplier/buyer tanpa PPN).</span></div>`; }
+function recalcItemTotal(){ const t=computeItemTotals(collectItems()); const ong=orderOngkirVal(); const ppnVal=(poVatOn()===false)?0:t.ppn; const a=document.getElementById('itemDPP'),b=document.getElementById('itemPPN'),c=document.getElementById('itemTotal'); if(a)a.textContent=rp(t.dpp); if(b)b.textContent=rp(ppnVal); if(c)c.textContent=rp(t.dpp+ppnVal+ong); }
 function bindItemRowEvents(){
   document.querySelectorAll('#itemRows .item-row').forEach(r=>{
     const d=r.querySelector('.it-del'); if(d) d.onclick=()=>{ r.remove(); recalcItemTotal(); };
@@ -861,15 +874,18 @@ function bindItemEditor(){
   const withPack=cont.dataset.pack==='1';
   const add=document.getElementById('itemAdd');
   if(add) add.onclick=()=>{ cont.insertAdjacentHTML('beforeend', itemRowHTML({}, withPack)); bindItemRowEvents(); };
+  const ong=document.getElementById('oOngkir'); if(ong) ong.oninput=recalcItemTotal;
+  const vat=document.getElementById('poVat'); if(vat) vat.onclick=()=>{ vat.dataset.on = vat.dataset.on==='1'?'0':'1'; vat.textContent='PPN 11%: '+(vat.dataset.on==='1'?'Aktif':'Nonaktif'); recalcItemTotal(); };
   bindItemRowEvents();
 }
 function itemsDisplayCard(title, items){
   items=items||[];
   if(!items.length) return '';
   const t=computeItemTotals(items);
-  const rows=items.map(it=>`<tr><td>${esc(it.nama||'-')}</td><td style="text-align:right">${esc(String(it.qty||''))} ${esc(it.satuan||'')}</td><td style="text-align:right">${rp(it.harga)}</td><td style="text-align:right">${rp((Number(it.qty)||0)*(Number(it.harga)||0))}</td></tr>`).join('');
+  const rows=items.filter(it=>!isOngkir(it)).map(it=>`<tr><td>${esc(it.nama||'-')}</td><td style="text-align:right">${esc(String(it.qty||''))} ${esc(it.satuan||'')}</td><td style="text-align:right">${rp(it.harga)}</td><td style="text-align:right">${rp((Number(it.qty)||0)*(Number(it.harga)||0))}</td></tr>`).join('');
   const foot=`<tr><td colspan="3" style="text-align:right;color:var(--ink-soft)">Subtotal</td><td style="text-align:right">${rp(t.dpp)}</td></tr>
     <tr><td colspan="3" style="text-align:right;color:var(--ink-soft)">PPN 11%</td><td style="text-align:right">${rp(t.ppn)}</td></tr>
+    ${t.ongkir?`<tr><td colspan="3" style="text-align:right;color:var(--ink-soft)">Ongkir</td><td style="text-align:right">${rp(t.ongkir)}</td></tr>`:''}
     <tr><td colspan="3" style="text-align:right;font-weight:600">Total</td><td style="text-align:right;font-weight:600">${rp(t.total)}</td></tr>`;
   return `<div class="o-card"><p style="margin:0 0 8px;font-weight:600;color:var(--ink)">${title}</p>
     <table class="o-table" style="font-size:13px"><thead><tr><th>Jenis teh</th><th style="text-align:right">Qty</th><th style="text-align:right">Harga/sat</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>${rows}</tbody><tfoot>${foot}</tfoot></table></div>`;
@@ -879,10 +895,13 @@ async function loadOrders(){
   orderLoading=true;
   const { data:bs } = await sb.from('buyers').select('id,nama').order('nama');
   buyersCache = bs||[];
-  const { data:os, error } = await sb.from('orders')
-    .select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,items_sample,po_masuk_no')
+  let { data:os, error } = await sb.from('orders')
+    .select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,items_sample,po_masuk_no,pakai_ppn')
     .order('created_at',{ascending:false});
-  if(error) console.error('load orders', error);
+  if(error){ // fallback bila kolom pakai_ppn belum ada (SQL belum dijalankan)
+    const r=await sb.from('orders').select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,items_sample,po_masuk_no').order('created_at',{ascending:false});
+    os=r.data; if(r.error) console.error('load orders', r.error);
+  }
   const bmap={}; buyersCache.forEach(b=>bmap[b.id]=b.nama);
   ordersCache=(os||[]).map(o=>({...o, buyer_name:bmap[o.buyer_id]||'—'}));
   orderLoading=false;
@@ -898,7 +917,36 @@ function viewOrderModule(){
   if(orderView==='new') return viewOrderNew();
   if(orderView==='edit' && openOrderId) return viewOrderEdit();
   if(orderView==='card' && openOrderId) return viewOrderCard();
+  if(orderView==='buyers') return viewBuyerManage();
   return viewOrderList();
+}
+function viewBuyerManage(){
+  const cnt={}; (ordersCache||[]).forEach(o=>{ cnt[o.buyer_id]=(cnt[o.buyer_id]||0)+1; });
+  const rows=(buyersCache||[]).slice().sort((a,b)=>(a.nama||'').localeCompare(b.nama||'')).map(b=>{
+    const n=cnt[b.id]||0;
+    return `<tr>
+      <td style="font-weight:600;color:var(--tea-dark)">${esc(b.nama)}</td>
+      <td style="text-align:right">${n} order</td>
+      <td style="text-align:right">${n===0?`<button class="o-btn ghost" data-delbuyer="${b.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:`<span style="color:var(--ink-soft);font-size:12px">ada order</span>`}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="o-wrap">
+    <div class="o-head"><h2 class="o-title">Kelola Buyer</h2><button class="o-btn ghost" id="bmBack">← Daftar Order</button></div>
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Hapus buyer yang tidak dipakai (mis. data testing). Buyer yang masih punya order tidak bisa dihapus — hapus order-nya dulu.</p>
+    <div class="o-card" style="padding:0;overflow:hidden">
+      <table class="o-table">
+        <thead><tr><th>Buyer</th><th style="text-align:right">Order</th><th style="text-align:right">Aksi</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="3" class="o-empty">Belum ada buyer.</td></tr>`}</tbody>
+      </table>
+    </div>
+  </div>`;
+}
+async function deleteBuyer(id){
+  const b=(buyersCache||[]).find(x=>x.id===id);
+  if(!confirm(`Hapus buyer "${b?b.nama:''}"? Tidak bisa dibatalkan.`)) return;
+  const { error }=await sb.from('buyers').delete().eq('id',id);
+  if(error){ alert('Gagal hapus: '+error.message+'\n(Buyer mungkin masih dipakai order/pengiriman/piutang.)'); return; }
+  buyersCache=null; ordersCache=null; render();
 }
 
 function viewOrderList(){
@@ -920,6 +968,7 @@ function viewOrderList(){
     <div class="o-head"><h2 class="o-title">Daftar Order</h2>
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
         <button class="o-btn ghost" id="oToggleDone" title="Tampilkan / sembunyikan order yang lunas &amp; batal">${hideDone?`Show selesai${doneCount?` (${doneCount})`:''}`:'Hide selesai'}</button>
+        <button class="o-btn ghost" id="oManageBuyer">Kelola buyer</button>
         <button class="o-btn" id="oNew">+ Order baru</button>
       </div></div>
     <div class="o-card" style="padding:0;overflow:hidden">
@@ -960,10 +1009,14 @@ function viewOrderNew(){
       <label class="o-field">Nilai sample (opsional)</label>
       <input class="o-input" id="oNilaiSample" type="number" inputmode="numeric" placeholder="nilai penawaran saat tahap sample" value="">
       <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Nilai tahap sample. Tersimpan terpisah — tidak tertimpa oleh nilai PO.</p>
-      ${itemEditorHTML([])}
+      ${itemEditorHTML([], true)}
+      ${vatToggleHTML(true)}
+      <label class="o-field">Ongkir (Rp, opsional)</label>
+      <input class="o-input" id="oOngkir" type="number" inputmode="numeric" placeholder="mis. 1000000 (tanpa PPN)" value="">
+      <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Biaya kirim ke buyer. Ditambahkan ke Total (tidak kena PPN).</p>
       <label class="o-field">Nilai jual (PO buyer)</label>
       <input class="o-input" id="oNilai" type="number" inputmode="numeric" placeholder="otomatis dari total item" value="">
-      <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Ada rincian item? Nilai jual otomatis dari total item. Isi manual hanya bila tanpa rincian.</p>
+      <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Ada rincian item? Nilai jual otomatis dari total item + ongkir. Isi manual hanya bila tanpa rincian.</p>
       <label class="o-field">Tanggal order</label>
       <input class="o-input" id="oTgl" type="date" value="${today()}">
       <label class="o-field">Catatan (opsional)</label>
@@ -1043,7 +1096,11 @@ function bindOrderModule(){
   if(orderView==='list'){
     const nb=document.getElementById('oNew'); if(nb) nb.onclick=()=>{ orderView='new'; render(); };
     const tg=document.getElementById('oToggleDone'); if(tg) tg.onclick=()=>{ hideDone=!hideDone; render(); };
+    const mb=document.getElementById('oManageBuyer'); if(mb) mb.onclick=()=>{ orderView='buyers'; render(); };
     document.querySelectorAll('.o-row').forEach(r=>r.onclick=()=>{ openOrderId=r.dataset.open; orderView='card'; sampleFormOpen=false; poFormOpen=false; buyerPayFormOpen=false; render(); });
+  } else if(orderView==='buyers'){
+    const bk=document.getElementById('bmBack'); if(bk) bk.onclick=()=>{ orderView='list'; render(); };
+    document.querySelectorAll('[data-delbuyer]').forEach(el=>el.onclick=()=>deleteBuyer(el.dataset.delbuyer));
   } else if(orderView==='new'){
     const bsel=document.getElementById('oBuyer');
     if(bsel) bsel.onchange=()=>{ const w=document.getElementById('oBuyerNewWrap'); if(w) w.style.display = bsel.value==='__new'?'block':'none'; };
@@ -1108,7 +1165,7 @@ async function deleteOrder(){
   const oid=openOrderId;
   const { error }=await sb.rpc('delete_order_cascade', { p_order: oid });
   if(error){ alert('Gagal hapus: '+error.message); return; }
-  orderSummary={}; poCache=null; billsCache=null; shipCache=null; orderFinance=null; finReport=null;
+  orderSummary={}; poCache=null; billsCache=null; shipCache=null; orderFinance=null; finReport=null; dashData=null;
   delete orderPayments[oid]; delete orderDocs[oid];
   ordersCache=null; orderView='list'; openOrderId=null; render();
 }
@@ -1131,10 +1188,14 @@ function viewOrderEdit(){
       <label class="o-field">Nilai sample (opsional)</label>
       <input class="o-input" id="oNilaiSample" type="number" value="${Number(o.nilai_sample)||0}">
       <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Nilai tahap sample. Tersimpan terpisah — tidak tertimpa oleh nilai PO.</p>
-      ${itemEditorHTML(o.items)}
+      ${itemEditorHTML((o.items||[]).filter(it=>!isOngkir(it)), true)}
+      ${vatToggleHTML(o.pakai_ppn)}
+      <label class="o-field">Ongkir (Rp, opsional)</label>
+      <input class="o-input" id="oOngkir" type="number" value="${ongkirTotal(o.items)||''}" placeholder="mis. 1000000 (tanpa PPN)">
+      <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Biaya kirim ke buyer. Ditambahkan ke Total (tidak kena PPN).</p>
       <label class="o-field">Nilai jual (PO buyer)</label>
       <input class="o-input" id="oNilai" type="number" value="${Number(o.nilai_jual)||0}">
-      <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Ada rincian item? Nilai jual otomatis dari total item.</p>
+      <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Ada rincian item? Nilai jual otomatis dari total item + ongkir.</p>
       <label class="o-field">Tanggal order</label>
       <input class="o-input" id="oTgl" type="date" value="${o.tanggal_order||today()}">
       <label class="o-field">Catatan (opsional)</label>
@@ -1151,8 +1212,10 @@ async function saveEditOrder(){
   const err=document.getElementById('oErr'); err.textContent='';
   const buyer_id=document.getElementById('oBuyer').value;
   const no=document.getElementById('oNo').value.trim();
-  const items=collectItems();
-  const nilai=items.length ? computeItemTotals(items).total : (Number(document.getElementById('oNilai').value)||0);
+  const items=itemsWithOngkir();
+  const vatOn=poVatOn()!==false;
+  const _t=computeItemTotals(items);
+  const nilai=items.length ? (vatOn?_t.total:_t.dpp+_t.ongkir) : (Number(document.getElementById('oNilai').value)||0);
   const nilaiSample=Number((document.getElementById('oNilaiSample')||{}).value)||0;
   const tgl=document.getElementById('oTgl').value||today();
   const cat=document.getElementById('oCatatan').value.trim();
@@ -1161,10 +1224,10 @@ async function saveEditOrder(){
   if(!no){ err.textContent='No order wajib diisi.'; return; }
   if(!buyer_id){ err.textContent='Pilih buyer.'; return; }
   const btn=document.getElementById('oSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('orders').update({ no_order:no, buyer_id, nilai_jual:nilai, nilai_sample:nilaiSample, tanggal_order:tgl, catatan:cat, status, items, po_masuk_no:poMasuk }).eq('id',openOrderId);
+  const { error }=await sb.from('orders').update({ no_order:no, buyer_id, nilai_jual:nilai, nilai_sample:nilaiSample, tanggal_order:tgl, catatan:cat, status, items, po_masuk_no:poMasuk, pakai_ppn:vatOn }).eq('id',openOrderId);
   if(error){ err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan perubahan'; return; }
   delete orderSummary[openOrderId];
-  ordersCache=null; orderView='card'; orderFinance=null; finReport=null; render();
+  ordersCache=null; orderView='card'; orderFinance=null; finReport=null; dashData=null; render();
 }
 
 async function resolveBuyerId(name){
@@ -1181,8 +1244,10 @@ async function saveNewOrder(){
   const bnewEl=document.getElementById('oBuyerNew');
   const bnew=bnewEl?bnewEl.value.trim():'';
   const no=document.getElementById('oNo').value.trim();
-  const items=collectItems();
-  const nilai=items.length ? computeItemTotals(items).total : (Number(document.getElementById('oNilai').value)||0);
+  const items=itemsWithOngkir();
+  const vatOn=poVatOn()!==false;
+  const _t=computeItemTotals(items);
+  const nilai=items.length ? (vatOn?_t.total:_t.dpp+_t.ongkir) : (Number(document.getElementById('oNilai').value)||0);
   const nilaiSample=Number((document.getElementById('oNilaiSample')||{}).value)||0;
   const tgl=document.getElementById('oTgl').value||today();
   const cat=document.getElementById('oCatatan').value.trim();
@@ -1197,9 +1262,9 @@ async function saveNewOrder(){
     // simpan item tahap sample sebagai histori sebelum item ditimpa item PO
     const sampleOrder=(ordersCache||[]).find(x=>x.id===fromSampleId);
     const items_sample=(sampleOrder&&Array.isArray(sampleOrder.items)&&sampleOrder.items.length)?sampleOrder.items:(sampleOrder?sampleOrder.items_sample:null)||[];
-    const { error }=await sb.from('orders').update({ status:'po', nilai_jual:nilai, po_masuk_no:poMasuk, items, items_sample, catatan:cat }).eq('id',fromSampleId);
+    const { error }=await sb.from('orders').update({ status:'po', nilai_jual:nilai, po_masuk_no:poMasuk, items, items_sample, catatan:cat, pakai_ppn:vatOn }).eq('id',fromSampleId);
     if(error){ err.textContent='Gagal simpan: '+error.message; reset(); return; }
-    delete orderSummary[fromSampleId]; ordersCache=null; orderView='list'; orderFinance=null; finReport=null; sampleDocIds=null; render();
+    delete orderSummary[fromSampleId]; ordersCache=null; orderView='list'; orderFinance=null; finReport=null; dashData=null; sampleDocIds=null; render();
     return;
   }
   let buyer_id=null;
@@ -1213,10 +1278,10 @@ async function saveNewOrder(){
   else { err.textContent='Pilih buyer dulu.'; reset(); return; }
   const { error }=await sb.from('orders').insert({
     no_order:no, buyer_id, nilai_jual:nilai, nilai_sample:nilaiSample, tanggal_order:tgl, catatan:cat,
-    items, status, po_masuk_no:poMasuk, pic_sales:currentUserId
+    items, status, po_masuk_no:poMasuk, pic_sales:currentUserId, pakai_ppn:vatOn
   });
   if(error){ err.textContent='Gagal simpan order: '+error.message; reset(); return; }
-  ordersCache=null; orderView='list'; orderFinance=null; finReport=null; render();
+  ordersCache=null; orderView='list'; orderFinance=null; finReport=null; dashData=null; render();
 }
 
 // ===== Sample + PI Sample (Langkah 6) =====
@@ -1275,6 +1340,7 @@ function docsSection(o){
         <div><label class="o-field" style="margin-top:0">Nomor</label><input class="o-input" id="docNo" value="${noVal}"></div>
       </div>
       ${itemEditorHTML(itemsVal)}
+      ${vatToggleHTML(editing?editing.pakai_ppn:true)}
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
         <div><label class="o-field">Tanggal</label><input class="o-input" id="docTgl" type="date" value="${tglVal}"></div>
         <div><label class="o-field">Nilai (Rp)</label><input class="o-input" id="docNilai" type="number" placeholder="otomatis dari item" value="${nilaiVal}"></div>
@@ -1298,12 +1364,13 @@ async function saveDoc(){
   const no=document.getElementById('docNo').value.trim();
   const tgl=document.getElementById('docTgl').value||today();
   const items=collectItems();
-  const nilai=items.length ? computeItemTotals(items).total : (Number(document.getElementById('docNilai').value)||0);
+  const vatOn=poVatOn()!==false;
+  const nilai=items.length ? (vatOn?computeItemTotals(items).total:itemsTotal(items)) : (Number(document.getElementById('docNilai').value)||0);
   if(!no){ err.textContent='Nomor dokumen wajib diisi.'; return; }
   const btn=document.getElementById('docSave'); btn.disabled=true; btn.textContent='Menyimpan…';
   let res;
-  if(editDocId){ res=await sb.from('order_docs').update({ jenis, nomor:no, tanggal:tgl, nilai, items }).eq('id',editDocId); }
-  else { res=await sb.from('order_docs').insert({ order_id:openOrderId, jenis, nomor:no, tanggal:tgl, nilai, items, status:'terbit' }); }
+  if(editDocId){ res=await sb.from('order_docs').update({ jenis, nomor:no, tanggal:tgl, nilai, items, pakai_ppn:vatOn }).eq('id',editDocId); }
+  else { res=await sb.from('order_docs').insert({ order_id:openOrderId, jenis, nomor:no, tanggal:tgl, nilai, items, status:'terbit', pakai_ppn:vatOn }); }
   if(res.error){ err.textContent='Gagal simpan: '+res.error.message; btn.disabled=false; btn.textContent='Simpan'; return; }
   sampleFormOpen=false; editDocId=null; delete orderDocs[openOrderId]; sampleDocIds=null; render();
 }
@@ -1406,6 +1473,7 @@ function viewPembelianForm(){
       <select class="o-input" id="pbSupplier"><option value="">— pilih supplier —</option>${sopts}<option value="__new">+ Supplier baru…</option></select>
       <div id="pbSupplierNewWrap" style="display:none"><label class="o-field">Nama supplier baru</label><input class="o-input" id="pbSupplierNew" placeholder="mis. Kebun Ciwidey / Toko RnB"></div>
       ${itemEditorHTML([])}
+      ${vatToggleHTML(true)}
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
         <div><label class="o-field">No nota / invoice supplier</label><input class="o-input" id="pbNo" placeholder="opsional"></div>
         <div><label class="o-field">Nilai (Rp)</label><input class="o-input" id="pbNilai" type="number" inputmode="numeric" placeholder="otomatis dari item"></div>
@@ -1430,7 +1498,8 @@ async function savePembelian(){
   const snewEl=document.getElementById('pbSupplierNew'); const snew=snewEl?snewEl.value.trim():'';
   const no=document.getElementById('pbNo').value.trim();
   const items=collectItems();
-  const nilai=items.length?computeItemTotals(items).total:(Number(document.getElementById('pbNilai').value)||0);
+  const vatOn=poVatOn()!==false;
+  const nilai=items.length?(vatOn?computeItemTotals(items).total:itemsTotal(items)):(Number(document.getElementById('pbNilai').value)||0);
   const terima=document.getElementById('pbTerima').value||today();
   const tempo=document.getElementById('pbTempo').value||null;
   const btn=document.getElementById('pbSave'); btn.disabled=true; btn.textContent='Menyimpan…';
@@ -1439,9 +1508,9 @@ async function savePembelian(){
   if(ssel==='__new'){ if(!snew){ if(err) err.textContent='Isi nama supplier baru.'; reset(); return; } const r=await resolveSupplierId(snew); if(r.error){ if(err) err.textContent='Gagal simpan supplier: '+r.error; reset(); return; } supplier_id=r.id; }
   else if(ssel){ supplier_id=ssel; } else { if(err) err.textContent='Pilih supplier.'; reset(); return; }
   if(nilai<=0){ if(err) err.textContent='Nilai harus lebih dari 0 (isi item atau nilai).'; reset(); return; }
-  const { error }=await sb.from('supplier_bills').insert({ no_tagihan:no, order_id, supplier_id, nilai, items, tanggal_terima:terima, jatuh_tempo:tempo, jenis, status:'belum' });
+  const { error }=await sb.from('supplier_bills').insert({ no_tagihan:no, order_id, supplier_id, nilai, items, tanggal_terima:terima, jatuh_tempo:tempo, jenis, status:'belum', pakai_ppn:vatOn });
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; reset(); return; }
-  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; pembelianFormOpen=false; render();
+  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; pembelianFormOpen=false; render();
 }
 function viewPembelian(){
   if(pembelianFormOpen) return viewPembelianForm();
@@ -1499,6 +1568,7 @@ function bindPembelian(){
 // ===== Modal: setoran modal + investor & bagi hasil =====
 let investorsCache=null, modalSetoranCache=null, bagiHasilCache=null, orderLabaCache=null;
 let modalForm=null; // null | 'setoran' | 'investor' | 'bagi'
+let editSetoranId=null, editInvestorId=null;
 async function loadModal(){
   try{
     const inv=await sb.from('investors').select('*').order('nama');
@@ -1529,6 +1599,7 @@ function viewModalModule(){
   if(modalForm==='bagi') return viewBagiForm();
   const canWr=canSeeCost();
   const delBtn=(attr,id)=>canWr?`<td style="text-align:right"><button class="o-btn ghost" data-${attr}="${id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>`:'';
+  const actBtns=(editAttr,delAttr,id)=>canWr?`<td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-${editAttr}="${id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-${delAttr}="${id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>`:'';
   const delHead=canWr?'<th></th>':'';
   const inv=investorsCache, setoran=modalSetoranCache, bh=bagiHasilCache;
   const totalSetoran=setoran.reduce((s,x)=>s+(Number(x.jumlah)||0),0);
@@ -1542,7 +1613,7 @@ function viewModalModule(){
     <td>${x.tanggal?fmtLong(x.tanggal):'-'}</td>
     <td style="color:var(--ink-soft);font-size:12px">${esc(x.catatan||'')}</td>
     <td style="text-align:right">${rp(x.jumlah)}</td>
-    ${delBtn('delset',x.id)}
+    ${actBtns('editset','delset',x.id)}
   </tr>`).join('');
   // Section 2a: investor list with computed total dibagikan
   const dibagikanBy={}; bh.forEach(x=>{ dibagikanBy[x.investor_id]=(dibagikanBy[x.investor_id]||0)+(Number(x.jumlah)||0); });
@@ -1551,7 +1622,7 @@ function viewModalModule(){
     <td>${investorTipeLabel(i.tipe)}</td>
     <td style="text-align:right">${i.persen!=null&&i.persen!==''?esc(i.persen)+'%':(i.tipe==='pemilik'?'sisa laba':'per-kasus')}</td>
     <td style="text-align:right">${rp(dibagikanBy[i.id]||0)}</td>
-    ${delBtn('delinv',i.id)}
+    ${actBtns('editinv','delinv',i.id)}
   </tr>`).join('');
   // Section 2b: bagi hasil entries
   const bhRows=bh.map(x=>`<tr>
@@ -1607,22 +1678,23 @@ function viewModalModule(){
 }
 // ---- Form: Tambah setoran modal ----
 function viewSetoranForm(){
-  const iopts=(investorsCache||[]).map(i=>`<option value="${i.id}">${esc(i.nama)} · ${investorTipeLabel(i.tipe)}</option>`).join('');
+  const e=editSetoranId?(modalSetoranCache||[]).find(x=>x.id===editSetoranId):null;
+  const iopts=(investorsCache||[]).map(i=>`<option value="${i.id}" ${e&&e.investor_id===i.id?'selected':''}>${esc(i.nama)} · ${investorTipeLabel(i.tipe)}</option>`).join('');
   return `<div class="o-wrap" style="max-width:480px">
-    <div class="o-head"><h2 class="o-title">Tambah setoran modal</h2></div>
+    <div class="o-head"><h2 class="o-title">${e?'Edit setoran modal':'Tambah setoran modal'}</h2></div>
     <div class="o-card">
       <label class="o-field" style="margin-top:0">Penyetor (pemilik / investor)</label>
       <select class="o-input" id="msInvestor"><option value="">— pilih —</option>${iopts}</select>
       ${(investorsCache||[]).length?'':`<p style="color:var(--ink-soft);font-size:12px;margin:6px 0 0">Belum ada investor. Tambahkan dulu lewat "+ Investor" di bagian 2.</p>`}
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
-        <div><label class="o-field">Tanggal</label><input class="o-input" id="msTgl" type="date" value="${today()}"></div>
-        <div><label class="o-field">Jumlah (Rp)</label><input class="o-input" id="msJumlah" type="number" inputmode="numeric" placeholder="mis. 25000000"></div>
+        <div><label class="o-field">Tanggal</label><input class="o-input" id="msTgl" type="date" value="${e&&e.tanggal?e.tanggal:today()}"></div>
+        <div><label class="o-field">Jumlah (Rp)</label><input class="o-input" id="msJumlah" type="number" inputmode="numeric" placeholder="mis. 25000000" value="${e?Number(e.jumlah)||'':''}"></div>
       </div>
       <label class="o-field">Catatan</label>
-      <input class="o-input" id="msCatatan" placeholder="opsional">
+      <input class="o-input" id="msCatatan" placeholder="opsional" value="${e?escAttr(e.catatan||''):''}">
       <div id="msErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:8px"></div>
       <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="o-btn" id="msSave">Simpan setoran</button>
+        <button class="o-btn" id="msSave">${e?'Simpan perubahan':'Simpan setoran'}</button>
         <button class="o-btn ghost" id="msCancel">Batal</button>
       </div>
     </div>
@@ -1638,27 +1710,31 @@ async function saveSetoran(){
   if(jumlah<=0){ if(err) err.textContent='Jumlah harus lebih dari 0.'; return; }
   const inv=(investorsCache||[]).find(x=>x.id===iid);
   const btn=document.getElementById('msSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('modal_setoran').insert({ investor_id:iid, nama:inv?inv.nama:null, tanggal:tgl, jumlah, catatan:cat });
+  const payload={ investor_id:iid, nama:inv?inv.nama:null, tanggal:tgl, jumlah, catatan:cat };
+  const { error }= editSetoranId
+    ? await sb.from('modal_setoran').update(payload).eq('id',editSetoranId)
+    : await sb.from('modal_setoran').insert(payload);
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan setoran'; return; }
-  investorsCache=null; finReport=null; modalForm=null; render();
+  investorsCache=null; finReport=null; dashData=null; modalForm=null; editSetoranId=null; render();
 }
 // ---- Form: Tambah investor ----
 function viewInvestorForm(){
-  const topts=[['pemilik','Pemilik (dapat sisa laba)'],['tetap','Investor tetap (% laba)'],['sesekali','Sesekali (per-kasus)']].map(t=>`<option value="${t[0]}">${t[1]}</option>`).join('');
+  const e=editInvestorId?(investorsCache||[]).find(x=>x.id===editInvestorId):null;
+  const topts=[['pemilik','Pemilik (dapat sisa laba)'],['tetap','Investor tetap (% laba)'],['sesekali','Sesekali (per-kasus)']].map(t=>`<option value="${t[0]}" ${e&&e.tipe===t[0]?'selected':''}>${t[1]}</option>`).join('');
   return `<div class="o-wrap" style="max-width:480px">
-    <div class="o-head"><h2 class="o-title">Tambah investor</h2></div>
+    <div class="o-head"><h2 class="o-title">${e?'Edit investor':'Tambah investor'}</h2></div>
     <div class="o-card">
       <label class="o-field" style="margin-top:0">Nama</label>
-      <input class="o-input" id="ivNama" placeholder="mis. Mba Sari">
+      <input class="o-input" id="ivNama" placeholder="mis. Mba Sari" value="${e?escAttr(e.nama):''}">
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
         <div><label class="o-field">Tipe</label><select class="o-input" id="ivTipe">${topts}</select></div>
-        <div><label class="o-field">Porsi % laba</label><input class="o-input" id="ivPersen" type="number" inputmode="decimal" placeholder="mis. 10 (kosong = per-kasus)"></div>
+        <div><label class="o-field">Porsi % laba</label><input class="o-input" id="ivPersen" type="number" inputmode="decimal" placeholder="mis. 10 (kosong = per-kasus)" value="${e&&e.persen!=null&&e.persen!==''?Number(e.persen):''}"></div>
       </div>
       <label class="o-field">Catatan</label>
-      <input class="o-input" id="ivCatatan" placeholder="opsional">
+      <input class="o-input" id="ivCatatan" placeholder="opsional" value="${e?escAttr(e.catatan||''):''}">
       <div id="ivErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:8px"></div>
       <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="o-btn" id="ivSave">Simpan investor</button>
+        <button class="o-btn" id="ivSave">${e?'Simpan perubahan':'Simpan investor'}</button>
         <button class="o-btn ghost" id="ivCancel">Batal</button>
       </div>
     </div>
@@ -1673,9 +1749,12 @@ async function saveInvestor(){
   const cat=document.getElementById('ivCatatan').value.trim();
   if(!nama){ if(err) err.textContent='Isi nama investor.'; return; }
   const btn=document.getElementById('ivSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('investors').insert({ nama, tipe, persen, catatan:cat });
+  const payload={ nama, tipe, persen, catatan:cat };
+  const { error }= editInvestorId
+    ? await sb.from('investors').update(payload).eq('id',editInvestorId)
+    : await sb.from('investors').insert(payload);
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan investor'; return; }
-  investorsCache=null; finReport=null; modalForm=null; render();
+  investorsCache=null; finReport=null; dashData=null; modalForm=null; editInvestorId=null; render();
 }
 // ---- Form: Catat bagi hasil ----
 function viewBagiForm(){
@@ -1736,14 +1815,14 @@ async function saveBagi(){
   const btn=document.getElementById('bgSave'); btn.disabled=true; btn.textContent='Menyimpan…';
   const { error }=await sb.from('bagi_hasil').insert({ investor_id:iid, order_id:oid, order_no:oid?ono:null, dasar, tanggal:tgl, jumlah, catatan:cat });
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan bagi hasil'; return; }
-  investorsCache=null; finReport=null; modalForm=null; render();
+  investorsCache=null; finReport=null; dashData=null; modalForm=null; render();
 }
-async function delSetoran(id){ if(!confirm('Hapus setoran modal ini?')) return; await sb.from('modal_setoran').delete().eq('id',id); investorsCache=null; finReport=null; render(); }
-async function delInvestor(id){ if(!confirm('Hapus investor ini? Setoran & bagi hasil yang sudah dicatat tetap tersimpan (tanpa tautan investor).')) return; await sb.from('investors').delete().eq('id',id); investorsCache=null; finReport=null; render(); }
-async function delBagi(id){ if(!confirm('Hapus catatan bagi hasil ini?')) return; await sb.from('bagi_hasil').delete().eq('id',id); investorsCache=null; finReport=null; render(); }
+async function delSetoran(id){ if(!confirm('Hapus setoran modal ini?')) return; await sb.from('modal_setoran').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; render(); }
+async function delInvestor(id){ if(!confirm('Hapus investor ini? Setoran & bagi hasil yang sudah dicatat tetap tersimpan (tanpa tautan investor).')) return; await sb.from('investors').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; render(); }
+async function delBagi(id){ if(!confirm('Hapus catatan bagi hasil ini?')) return; await sb.from('bagi_hasil').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; render(); }
 function bindModalModule(){
-  if(modalForm==='setoran'){ document.getElementById('msSave').onclick=saveSetoran; document.getElementById('msCancel').onclick=()=>{ modalForm=null; render(); }; return; }
-  if(modalForm==='investor'){ document.getElementById('ivSave').onclick=saveInvestor; document.getElementById('ivCancel').onclick=()=>{ modalForm=null; render(); }; return; }
+  if(modalForm==='setoran'){ document.getElementById('msSave').onclick=saveSetoran; document.getElementById('msCancel').onclick=()=>{ modalForm=null; editSetoranId=null; render(); }; return; }
+  if(modalForm==='investor'){ document.getElementById('ivSave').onclick=saveInvestor; document.getElementById('ivCancel').onclick=()=>{ modalForm=null; editInvestorId=null; render(); }; return; }
   if(modalForm==='bagi'){
     const bi=document.getElementById('bgInvestor'); if(bi) bi.onchange=bagiRecalc;
     const bo=document.getElementById('bgOrder'); if(bo) bo.onchange=bagiRecalc;
@@ -1752,16 +1831,18 @@ function bindModalModule(){
     document.getElementById('bgCancel').onclick=()=>{ modalForm=null; render(); };
     return;
   }
-  const a=document.getElementById('mdAddSetoran'); if(a) a.onclick=()=>{ modalForm='setoran'; render(); };
-  const b=document.getElementById('mdAddInvestor'); if(b) b.onclick=()=>{ modalForm='investor'; render(); };
+  const a=document.getElementById('mdAddSetoran'); if(a) a.onclick=()=>{ editSetoranId=null; modalForm='setoran'; render(); };
+  const b=document.getElementById('mdAddInvestor'); if(b) b.onclick=()=>{ editInvestorId=null; modalForm='investor'; render(); };
   const d=document.getElementById('mdAddBagi'); if(d) d.onclick=()=>{ modalForm='bagi'; render(); };
+  document.querySelectorAll('[data-editset]').forEach(el=>el.onclick=()=>{ editSetoranId=el.dataset.editset; modalForm='setoran'; render(); });
+  document.querySelectorAll('[data-editinv]').forEach(el=>el.onclick=()=>{ editInvestorId=el.dataset.editinv; modalForm='investor'; render(); });
   document.querySelectorAll('[data-delset]').forEach(el=>el.onclick=()=>delSetoran(el.dataset.delset));
   document.querySelectorAll('[data-delinv]').forEach(el=>el.onclick=()=>delInvestor(el.dataset.delinv));
   document.querySelectorAll('[data-delbagi]').forEach(el=>el.onclick=()=>delBagi(el.dataset.delbagi));
 }
 
 // ===== Aset: aset tetap + ringkasan aset lancar =====
-let asetCache=null; let asetForm=false;
+let asetCache=null; let asetForm=false; let editAsetId=null;
 async function loadAset(){
   try{ const { data }=await sb.from('aset_tetap').select('*').order('tanggal'); asetCache=data||[]; }
   catch(e){ asetCache=asetCache||[]; }
@@ -1781,7 +1862,7 @@ function viewAsetModule(){
     <td>${x.tanggal?fmtLong(x.tanggal):'-'}</td>
     <td style="color:var(--ink-soft);font-size:12px">${esc(x.catatan||'')}</td>
     <td style="text-align:right">${rp(x.nilai)}</td>
-    ${canWr?`<td style="text-align:right"><button class="o-btn ghost" data-delaset="${x.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>`:''}
+    ${canWr?`<td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-editaset="${x.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delaset="${x.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>`:''}
   </tr>`).join('');
   const kv=(l,v,color)=>`<tr><td>${l}</td><td style="text-align:right${color?`;color:${color}`:''}">${rp(v)}</td></tr>`;
   return `<div class="o-wrap">
@@ -1814,20 +1895,21 @@ function viewAsetModule(){
   </div>`;
 }
 function viewAsetForm(){
+  const e=editAsetId?(asetCache||[]).find(x=>x.id===editAsetId):null;
   return `<div class="o-wrap" style="max-width:480px">
-    <div class="o-head"><h2 class="o-title">Tambah aset tetap</h2></div>
+    <div class="o-head"><h2 class="o-title">${e?'Edit aset tetap':'Tambah aset tetap'}</h2></div>
     <div class="o-card">
       <label class="o-field" style="margin-top:0">Nama aset</label>
-      <input class="o-input" id="asNama" placeholder="mis. Sealer otomatis / Bangunan">
+      <input class="o-input" id="asNama" placeholder="mis. Sealer otomatis / Bangunan" value="${e?escAttr(e.nama):''}">
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
-        <div><label class="o-field">Tanggal perolehan</label><input class="o-input" id="asTgl" type="date" value="${today()}"></div>
-        <div><label class="o-field">Nilai (Rp)</label><input class="o-input" id="asNilai" type="number" inputmode="numeric" placeholder="mis. 2800000"></div>
+        <div><label class="o-field">Tanggal perolehan</label><input class="o-input" id="asTgl" type="date" value="${e&&e.tanggal?e.tanggal:today()}"></div>
+        <div><label class="o-field">Nilai (Rp)</label><input class="o-input" id="asNilai" type="number" inputmode="numeric" placeholder="mis. 2800000" value="${e?Number(e.nilai)||'':''}"></div>
       </div>
       <label class="o-field">Catatan</label>
-      <input class="o-input" id="asCatatan" placeholder="opsional">
+      <input class="o-input" id="asCatatan" placeholder="opsional" value="${e?escAttr(e.catatan||''):''}">
       <div id="asErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:8px"></div>
       <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="o-btn" id="asSave">Simpan aset</button>
+        <button class="o-btn" id="asSave">${e?'Simpan perubahan':'Simpan aset'}</button>
         <button class="o-btn ghost" id="asCancel">Batal</button>
       </div>
     </div>
@@ -1842,14 +1924,18 @@ async function saveAset(){
   if(!nama){ if(err) err.textContent='Isi nama aset.'; return; }
   if(nilai<=0){ if(err) err.textContent='Nilai harus lebih dari 0.'; return; }
   const btn=document.getElementById('asSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('aset_tetap').insert({ nama, tanggal:tgl, nilai, catatan:cat });
+  const payload={ nama, tanggal:tgl, nilai, catatan:cat };
+  const { error }= editAsetId
+    ? await sb.from('aset_tetap').update(payload).eq('id',editAsetId)
+    : await sb.from('aset_tetap').insert(payload);
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan aset'; return; }
-  asetCache=null; finReport=null; asetForm=false; render();
+  asetCache=null; finReport=null; dashData=null; asetForm=false; editAsetId=null; render();
 }
-async function delAset(id){ if(!confirm('Hapus aset ini?')) return; await sb.from('aset_tetap').delete().eq('id',id); asetCache=null; finReport=null; render(); }
+async function delAset(id){ if(!confirm('Hapus aset ini?')) return; await sb.from('aset_tetap').delete().eq('id',id); asetCache=null; finReport=null; dashData=null; render(); }
 function bindAsetModule(){
-  if(asetForm){ document.getElementById('asSave').onclick=saveAset; document.getElementById('asCancel').onclick=()=>{ asetForm=false; render(); }; return; }
-  const a=document.getElementById('asAdd'); if(a) a.onclick=()=>{ asetForm=true; render(); };
+  if(asetForm){ document.getElementById('asSave').onclick=saveAset; document.getElementById('asCancel').onclick=()=>{ asetForm=false; editAsetId=null; render(); }; return; }
+  const a=document.getElementById('asAdd'); if(a) a.onclick=()=>{ editAsetId=null; asetForm=true; render(); };
+  document.querySelectorAll('[data-editaset]').forEach(el=>el.onclick=()=>{ editAsetId=el.dataset.editaset; asetForm=true; render(); });
   document.querySelectorAll('[data-delaset]').forEach(el=>el.onclick=()=>delAset(el.dataset.delaset));
 }
 
@@ -1950,10 +2036,10 @@ async function savePinjaman(){
   const btn=document.getElementById('pjSave'); btn.disabled=true; btn.textContent='Menyimpan…';
   const { error }=await sb.from('pinjaman').insert({ pemberi, tanggal:tgl, jumlah, status:'belum', catatan:cat });
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan pinjaman'; return; }
-  pinjamanCache=null; finReport=null; pinjamanForm=false; render();
+  pinjamanCache=null; finReport=null; dashData=null; pinjamanForm=false; render();
 }
-async function togglePinjaman(id, cur){ const ns=cur==='lunas'?'belum':'lunas'; await sb.from('pinjaman').update({status:ns}).eq('id',id); pinjamanCache=null; finReport=null; render(); }
-async function delPinjaman(id){ if(!confirm('Hapus catatan pinjaman ini?')) return; await sb.from('pinjaman').delete().eq('id',id); pinjamanCache=null; finReport=null; render(); }
+async function togglePinjaman(id, cur){ const ns=cur==='lunas'?'belum':'lunas'; await sb.from('pinjaman').update({status:ns}).eq('id',id); pinjamanCache=null; finReport=null; dashData=null; render(); }
+async function delPinjaman(id){ if(!confirm('Hapus catatan pinjaman ini?')) return; await sb.from('pinjaman').delete().eq('id',id); pinjamanCache=null; finReport=null; dashData=null; render(); }
 function bindHutangModule(){
   if(pinjamanForm){ document.getElementById('pjSave').onclick=savePinjaman; document.getElementById('pjCancel').onclick=()=>{ pinjamanForm=false; render(); }; return; }
   const a=document.getElementById('htAddPinjaman'); if(a) a.onclick=()=>{ pinjamanForm=true; render(); };
@@ -2017,8 +2103,10 @@ function viewKasModule(){
     </div>
   </div>`;
 }
+const BIAYA_KATEGORI=['Raw material','Delivery: Supplier ke Warehouse','Delivery: Warehouse ke Buyer','Gaji karyawan','RnB','Sample / Marketing','Biaya usaha lainnya'];
 function viewKasForm(){
   const jopts=[['biaya_usaha','Biaya usaha (uang keluar)'],['modal','Setoran modal (uang masuk)'],['lain','Lainnya']].map(j=>`<option value="${j[0]}">${j[1]}</option>`).join('');
+  const kopts=BIAYA_KATEGORI.map(k=>`<option value="${escAttr(k)}">${esc(k)}</option>`).join('');
   return `<div class="o-wrap" style="max-width:480px">
     <div class="o-head"><h2 class="o-title">Catat transaksi kas</h2></div>
     <div class="o-card">
@@ -2029,9 +2117,10 @@ function viewKasForm(){
         <div><label class="o-field">Tanggal</label><input class="o-input" id="kxTgl" type="date" value="${today()}"></div>
       </div>
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
-        <div><label class="o-field">Kategori</label><input class="o-input" id="kxKategori" placeholder="mis. Gaji / Transport / ATK"></div>
+        <div><label class="o-field">Kategori</label><select class="o-input" id="kxKategori">${kopts}<option value="__custom">Lainnya (isi sendiri)…</option></select></div>
         <div><label class="o-field">Jumlah (Rp)</label><input class="o-input" id="kxJumlah" type="number" inputmode="numeric" placeholder="mis. 500000"></div>
       </div>
+      <input class="o-input" id="kxKategoriCustom" placeholder="Tulis kategori lain" style="display:none;margin-top:6px">
       <label class="o-field">Catatan</label>
       <input class="o-input" id="kxCatatan" placeholder="opsional">
       <div id="kxErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:8px"></div>
@@ -2047,18 +2136,21 @@ async function saveKas(){
   const jenis=document.getElementById('kxJenis').value||'lain';
   const arah=document.getElementById('kxArah').value||'keluar';
   const tgl=document.getElementById('kxTgl').value||today();
-  const kategori=document.getElementById('kxKategori').value.trim();
+  let kategori=document.getElementById('kxKategori').value;
+  if(kategori==='__custom') kategori=(document.getElementById('kxKategoriCustom').value||'').trim();
   const jumlah=Number(document.getElementById('kxJumlah').value)||0;
   const cat=document.getElementById('kxCatatan').value.trim();
   if(jumlah<=0){ if(err) err.textContent='Jumlah harus lebih dari 0.'; return; }
   const btn=document.getElementById('kxSave'); btn.disabled=true; btn.textContent='Menyimpan…';
   const { error }=await sb.from('transactions').insert({ tanggal:tgl, arah, jenis, jumlah, kategori, catatan:cat });
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan transaksi'; return; }
-  ledgerCache=null; orderFinance=null; finReport=null; kasForm=false; render();
+  ledgerCache=null; orderFinance=null; finReport=null; dashData=null; kasForm=false; render();
 }
-async function delKas(id){ if(!confirm('Hapus transaksi kas ini?')) return; await sb.from('transactions').delete().eq('id',id); ledgerCache=null; orderFinance=null; finReport=null; render(); }
+async function delKas(id){ if(!confirm('Hapus transaksi kas ini?')) return; await sb.from('transactions').delete().eq('id',id); ledgerCache=null; orderFinance=null; finReport=null; dashData=null; render(); }
 function bindKasModule(){
-  if(kasForm){ document.getElementById('kxSave').onclick=saveKas; document.getElementById('kxCancel').onclick=()=>{ kasForm=false; render(); }; return; }
+  if(kasForm){ document.getElementById('kxSave').onclick=saveKas; document.getElementById('kxCancel').onclick=()=>{ kasForm=false; render(); };
+    const kk=document.getElementById('kxKategori'); if(kk) kk.onchange=()=>{ const cu=document.getElementById('kxKategoriCustom'); if(cu) cu.style.display=kk.value==='__custom'?'block':'none'; };
+    return; }
   const n=document.getElementById('kasNew'); if(n) n.onclick=()=>{ kasForm=true; render(); };
   document.querySelectorAll('[data-delkas]').forEach(el=>el.onclick=()=>delKas(el.dataset.delkas));
 }
@@ -2163,54 +2255,67 @@ function viewPenjualanReport(){
 }
 
 // ===== Laporan Keuangan (order-based) + Cetak PDF (Laba Rugi, Neraca, Arus Kas, Buku Kas) =====
-let finReport=null;
+let dashData=null;
+let finReport=null; dashData=null;
+let finMonth='all'; // 'all' | 'YYYY-MM'
 async function loadFinReport(){
   const sel=async(tbl,cols)=>{ try{ const { data }=await sb.from(tbl).select(cols); return data||[]; }catch(e){ return []; } };
-  const [vs,tx,at,pj,bills,bpays,ms,bh]=await Promise.all([
-    sel('v_order_summary','nilai_jual,hpp,piutang,status,masuk_buyer,no_order'),
+  const [vs,tx,at,pj,bills,bpays,ms,bh,ords]=await Promise.all([
+    sel('v_order_summary','id,nilai_jual,hpp,piutang,status,masuk_buyer,no_order'),
     sel('transactions','tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order)'),
-    sel('aset_tetap','nilai'),
-    sel('pinjaman','jumlah,status'),
-    sel('supplier_bills','id,nilai'),
+    sel('aset_tetap','nilai,tanggal'),
+    sel('pinjaman','jumlah,status,tanggal'),
+    sel('supplier_bills','id,nilai,tanggal_terima'),
     sel('bill_payments','bill_id,jumlah'),
-    sel('modal_setoran','jumlah'),
-    sel('bagi_hasil','jumlah')
+    sel('modal_setoran','jumlah,tanggal'),
+    sel('bagi_hasil','jumlah,tanggal'),
+    sel('orders','id,tanggal_order')
   ]);
   const n=x=>Number(x)||0;
-  const nb=vs.filter(o=>o.status!=='batal');
+  const ym = finMonth==='all'?null:finMonth;
+  const m=d=> !ym || String(d||'').slice(0,7)===ym;      // cocok bulan
+  const omonth={}; ords.forEach(o=>{ omonth[o.id]=(o.tanggal_order||'').slice(0,7); });
+  const nb=vs.filter(o=>o.status!=='batal' && (!ym||omonth[o.id]===ym));
   const penjualanGross=nb.reduce((s,o)=>s+n(o.nilai_jual),0);
   const ppn=Math.round(penjualanGross*11/111);
   const penjualanNetto=penjualanGross-ppn;
   const hpp=nb.reduce((s,o)=>s+n(o.hpp),0);
   const labaKotor=penjualanNetto-hpp;
   const piutang=nb.reduce((s,o)=>s+n(o.piutang),0);
+  const txF=tx.filter(t=>m(t.tanggal));
   let kasMasuk=0,kasKeluar=0,biaya=0;
-  tx.forEach(t=>{ const j=n(t.jumlah); if(t.arah==='masuk')kasMasuk+=j; else if(t.arah==='keluar')kasKeluar+=j; if(t.jenis==='biaya_usaha')biaya+=j; });
+  txF.forEach(t=>{ const j=n(t.jumlah); if(t.arah==='masuk')kasMasuk+=j; else if(t.arah==='keluar')kasKeluar+=j; if(t.jenis==='biaya_usaha')biaya+=j; });
   const saldoKas=kasMasuk-kasKeluar;
   const labaBersih=labaKotor-biaya;
-  const asetTetap=at.reduce((s,x)=>s+n(x.nilai),0);
+  const asetTetap=at.filter(x=>m(x.tanggal)).reduce((s,x)=>s+n(x.nilai),0);
   const totalAset=saldoKas+piutang+asetTetap;
-  const pinjamanBelum=pj.filter(p=>p.status!=='lunas').reduce((s,x)=>s+n(x.jumlah),0);
+  const pinjamanBelum=pj.filter(p=>p.status!=='lunas'&&m(p.tanggal)).reduce((s,x)=>s+n(x.jumlah),0);
   const paid={}; bpays.forEach(p=>{ paid[p.bill_id]=(paid[p.bill_id]||0)+n(p.jumlah); });
-  const supplierSisa=bills.reduce((s,b)=>s+Math.max(0,n(b.nilai)-(paid[b.id]||0)),0);
+  const supplierSisa=bills.filter(b=>m(b.tanggal_terima)).reduce((s,b)=>s+Math.max(0,n(b.nilai)-(paid[b.id]||0)),0);
   const totalHutang=pinjamanBelum+supplierSisa;
-  const setoranModal=ms.reduce((s,x)=>s+n(x.jumlah),0);
-  const bagiHasil=bh.reduce((s,x)=>s+n(x.jumlah),0);
+  const setoranModal=ms.filter(x=>m(x.tanggal)).reduce((s,x)=>s+n(x.jumlah),0);
+  const bagiHasil=bh.filter(x=>m(x.tanggal)).reduce((s,x)=>s+n(x.jumlah),0);
   const labaDitahan=labaBersih-bagiHasil;
   const totalModal=setoranModal+labaDitahan;
   const selisih=totalAset-(totalHutang+totalModal);
-  const ledger=tx.map(t=>({...t, order_no:t.orders?t.orders.no_order:null})).sort((a,b)=>String(a.tanggal||'').localeCompare(String(b.tanggal||'')));
-  finReport={penjualanGross,ppn,penjualanNetto,hpp,labaKotor,biaya,labaBersih,piutang,saldoKas,kasMasuk,kasKeluar,asetTetap,totalAset,pinjamanBelum,supplierSisa,totalHutang,setoranModal,bagiHasil,labaDitahan,totalModal,selisih,ledger};
+  const ledger=txF.map(t=>({...t, order_no:t.orders?t.orders.no_order:null})).sort((a,b)=>String(a.tanggal||'').localeCompare(String(b.tanggal||'')));
+  finReport={penjualanGross,ppn,penjualanNetto,hpp,labaKotor,biaya,labaBersih,piutang,saldoKas,kasMasuk,kasKeluar,asetTetap,totalAset,pinjamanBelum,supplierSisa,totalHutang,setoranModal,bagiHasil,labaDitahan,totalModal,selisih,ledger,periode:ym};
   render();
 }
-function resetFinReport(){ finReport=null; }
+function resetFinReport(){ finReport=null; dashData=null; }
 function viewLaporan(){
   if(finReport===null){ loadFinReport(); return `<div class="o-wrap"><div class="o-card">Memuat laporan…</div></div>`; }
   const f=finReport;
   const stat=(l,v,c)=>`<div class="o-stat"><div class="l">${l}</div><div class="v" style="${c?`color:${c}`:''}">${rp(v)}</div></div>`;
+  const monthOpts=`<option value="all" ${finMonth==='all'?'selected':''}>Semua bulan</option>`+ID_MONTHS_2026.map((m,i)=>{ const val='2026-'+String(i+1).padStart(2,'0'); return `<option value="${val}" ${finMonth===val?'selected':''}>${m}</option>`; }).join('');
+  const periodeLbl = finMonth==='all' ? 'Semua bulan' : (ID_MONTHS_2026[parseInt(finMonth.slice(5,7),10)-1]||finMonth);
   return `<div class="o-wrap">
-    <div class="o-head"><h2 class="o-title">Laporan Keuangan</h2><button class="o-btn" id="finPrint">Cetak Laporan (PDF)</button></div>
-    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 14px">Ringkasan seluruh order &amp; transaksi tercatat. Rincian <b>Laba Rugi, Neraca, Arus Kas &amp; Buku Kas</b> ada di dokumen <b>Cetak Laporan (PDF)</b>. PPN 11% dipisahkan dari penjualan (bukan pendapatan — dititip untuk disetor ke negara).</p>
+    <div class="o-head"><h2 class="o-title">Laporan Keuangan</h2>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <select class="o-input" id="finMonthSel" style="width:auto;padding:8px 10px">${monthOpts}</select>
+        <button class="o-btn" id="finPrint">Cetak Laporan (PDF)</button>
+      </div></div>
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 14px">Periode: <b>${periodeLbl}</b>. Rincian <b>Laba Rugi, Neraca, Arus Kas &amp; Buku Kas</b> ada di <b>Cetak Laporan (PDF)</b>. PPN 11% dipisahkan dari penjualan (dititip disetor ke negara).</p>
     <div class="o-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:6px">
       ${stat('Penjualan (inc PPN)', f.penjualanGross)}
       ${stat('PPN 11%', f.ppn, 'var(--ink-soft)')}
@@ -2223,7 +2328,10 @@ function viewLaporan(){
     </div>
   </div>`;
 }
-function bindLaporan(){ const b=document.getElementById('finPrint'); if(b) b.onclick=openFinReportPrint; }
+function bindLaporan(){
+  const b=document.getElementById('finPrint'); if(b) b.onclick=openFinReportPrint;
+  const ms=document.getElementById('finMonthSel'); if(ms) ms.onchange=()=>{ finMonth=ms.value; finReport=null; render(); };
+}
 function openFinReportPrint(){
   if(!finReport) return; const f=finReport; const s=state.seller||{};
   const GD='#1F3D33', GREEN='#2F7A4F', RED='#A32D2D', LINE='#E4DCCB', SOFT='#7A7A72', BAND='#F1EEE4', ZEB='#FAF8F2';
@@ -2326,7 +2434,7 @@ function openFinReportPrint(){
           <div style="font-size:10px;color:#B9C7BF;margin-top:4px;">${esc(s.legal)||'PT GLOBAL TROPICA FARMINDO'}${s.alamat?' &middot; '+esc(s.alamat):''}</div></div>
         </div>
         <div style="text-align:right;"><div style="font-size:16px;font-weight:700;letter-spacing:.12em;">LAPORAN KEUANGAN</div>
-        <div style="font-size:10px;color:#B9C7BF;margin-top:4px;">Per ${tglStr} &middot; Seluruh transaksi tercatat</div></div>
+        <div style="font-size:10px;color:#B9C7BF;margin-top:4px;">Periode: ${f.periode?(ID_MONTHS_2026[parseInt(f.periode.slice(5,7),10)-1]||f.periode):'Semua bulan'} &middot; dicetak ${tglStr}</div></div>
       </div>
       <div style="padding:22px 30px 30px;">
         <div style="display:flex;gap:10px;margin-bottom:6px;">
@@ -2373,7 +2481,8 @@ async function loadPOs(){
     const bmap={}; (buyersCache||[]).forEach(b=>bmap[b.id]=b.nama);
     ordersCache=(os||[]).map(o=>({...o, buyer_name:bmap[o.buyer_id]||'—'}));
   }
-  const { data:ps }=await sb.from('purchase_orders').select('id,no_po,order_id,supplier_id,tanggal,total,status,items,jatuh_tempo,deadline_kirim,bayar_status,suppliers(nama),orders(no_order)').order('created_at',{ascending:false});
+  let { data:ps, error:pErr }=await sb.from('purchase_orders').select('id,no_po,order_id,supplier_id,tanggal,total,status,items,jatuh_tempo,deadline_kirim,bayar_status,pakai_ppn,suppliers(nama),orders(no_order)').order('created_at',{ascending:false});
+  if(pErr){ const r=await sb.from('purchase_orders').select('id,no_po,order_id,supplier_id,tanggal,total,status,items,jatuh_tempo,deadline_kirim,bayar_status,suppliers(nama),orders(no_order)').order('created_at',{ascending:false}); ps=r.data; }
   poCache=(ps||[]).map(p=>({...p, supplier_name:p.suppliers?p.suppliers.nama:'—', order_no:p.orders?p.orders.no_order:'—'}));
   poLoading=false;
   render();
@@ -2394,6 +2503,8 @@ function poFormFields(items){
       <div><label class="o-field">Tanggal</label><input class="o-input" id="poTgl" type="date" value="${today()}"></div>
     </div>
     ${itemEditorHTML(items||[], true)}
+    <div style="margin-top:6px"><button type="button" class="o-btn ghost" id="poVat" data-on="1">PPN 11%: Aktif</button>
+    <span style="font-size:11px;color:var(--ink-soft);margin-left:8px">Klik untuk ubah. Matikan untuk supplier tanpa PPN (mis. Naufal).</span></div>
     <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
       <div><label class="o-field">Total pembelian (Rp)</label><input class="o-input" id="poTotal" type="number" inputmode="numeric" placeholder="otomatis dari total item" value=""></div>
       <div><label class="o-field">Jatuh tempo bayar (internal)</label><input class="o-input" id="poTempo" type="date"></div>
@@ -2428,6 +2539,8 @@ function viewPOEdit(){
       <label class="o-field">Supplier</label>
       <select class="o-input" id="poSupplier">${sopts}</select>
       ${itemEditorHTML(p.items, true)}
+      <div style="margin-top:6px"><button type="button" class="o-btn ghost" id="poVat" data-on="${p.pakai_ppn===false?'0':'1'}">PPN 11%: ${p.pakai_ppn===false?'Nonaktif':'Aktif'}</button>
+      <span style="font-size:11px;color:var(--ink-soft);margin-left:8px">Klik untuk ubah (supplier tanpa PPN → Nonaktif).</span></div>
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
         <div><label class="o-field">No PO</label><input class="o-input" id="poNo" value="${escAttr(p.no_po||'')}"></div>
         <div><label class="o-field">Tanggal</label><input class="o-input" id="poTgl" type="date" value="${p.tanggal||today()}"></div>
@@ -2452,7 +2565,8 @@ async function saveEditPO(){
   const supplier_id=document.getElementById('poSupplier').value||null;
   const no=document.getElementById('poNo').value.trim();
   const items=collectItems();
-  const total=items.length?computeItemTotals(items).total:(Number(document.getElementById('poTotal').value)||0);
+  const vatOn=poVatOn()!==false;
+  const total=items.length?(vatOn?computeItemTotals(items).total:itemsTotal(items)):(Number(document.getElementById('poTotal').value)||0);
   const tgl=document.getElementById('poTgl').value||today();
   const bayarStatus=document.getElementById('poStatus').value||'belum';
   const tempo=document.getElementById('poTempo')?(document.getElementById('poTempo').value||null):null;
@@ -2460,7 +2574,7 @@ async function saveEditPO(){
   if(!supplier_id){ err.textContent='Pilih supplier.'; return; }
   if(!no){ err.textContent='No PO wajib diisi.'; return; }
   const btn=document.getElementById('poSaveEdit'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('purchase_orders').update({ no_po:no, order_id, supplier_id, tanggal:tgl, total, items, jatuh_tempo:tempo, deadline_kirim:deadline, bayar_status:bayarStatus }).eq('id',editPOId);
+  const { error }=await sb.from('purchase_orders').update({ no_po:no, order_id, supplier_id, tanggal:tgl, total, items, jatuh_tempo:tempo, deadline_kirim:deadline, bayar_status:bayarStatus, pakai_ppn:vatOn }).eq('id',editPOId);
   if(error){ err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan perubahan'; return; }
   orderSummary={}; poCache=null; poView='list'; editPOId=null; render();
 }
@@ -2523,7 +2637,8 @@ async function savePO(){
   const no=document.getElementById('poNo').value.trim();
   const tgl=document.getElementById('poTgl').value||today();
   const items=collectItems();
-  const total=items.length ? computeItemTotals(items).total : (Number(document.getElementById('poTotal').value)||0);
+  const vatOn=poVatOn()!==false;
+  const total=items.length ? (vatOn?computeItemTotals(items).total:itemsTotal(items)) : (Number(document.getElementById('poTotal').value)||0);
   const bayarStatus=(document.getElementById('poStatus')||{}).value||'belum';
   const tempo=document.getElementById('poTempo')?(document.getElementById('poTempo').value||null):null;
   const deadline=document.getElementById('poDeadline')?(document.getElementById('poDeadline').value||null):null;
@@ -2537,7 +2652,7 @@ async function savePO(){
     const r=await resolveSupplierId(snew); if(r.error){ err.textContent='Gagal simpan supplier: '+r.error; reset(); return; } supplier_id=r.id;
   } else if(ssel){ supplier_id=ssel; }
   else { err.textContent='Pilih supplier.'; reset(); return; }
-  const { error }=await sb.from('purchase_orders').insert({ no_po:no, order_id, supplier_id, tanggal:tgl, total, items, jatuh_tempo:tempo, deadline_kirim:deadline, bayar_status:bayarStatus });
+  const { error }=await sb.from('purchase_orders').insert({ no_po:no, order_id, supplier_id, tanggal:tgl, total, items, jatuh_tempo:tempo, deadline_kirim:deadline, bayar_status:bayarStatus, pakai_ppn:vatOn });
   if(error){ err.textContent='Gagal simpan PO: '+error.message; reset(); return; }
   poCache=null;
   if(orderSel) poView='list'; else poFormOpen=false;
@@ -2582,9 +2697,10 @@ function openPOPrint(poId){
   const s=state.seller||{};
   const items=p.items||[];
   const t=computeItemTotals(items);
+  const vatOn = p.pakai_ppn!==false;
   const sub = items.length ? t.dpp : (Number(p.total)||0);
-  const ppn = items.length ? t.ppn : 0;
-  const grand = items.length ? t.total : (Number(p.total)||0);
+  const ppn = (items.length && vatOn) ? t.ppn : 0;
+  const grand = items.length ? (vatOn?t.total:t.dpp) : (Number(p.total)||0);
   const itemRows=items.map((r,i)=>{
     const qtyTxt=`${esc(String(r.qty!=null?r.qty:''))} ${esc(r.satuan||'')}`.trim();
     return `<tr><td class="c">${i+1}</td><td class="t">${esc(r.nama)}</td><td class="c">${qtyTxt||'-'}</td><td class="c">${esc(r.packaging||'-')}</td><td class="r">Rp ${(Number(r.harga)||0).toLocaleString('id-ID')}</td></tr>`;
@@ -2618,7 +2734,7 @@ function openPOPrint(poId){
         <tr><th style="width:40px;">No.</th><th>Description</th><th style="width:88px;">Quantity</th><th style="width:130px;">Packaging</th><th style="width:120px;">Unit Price</th></tr>
         ${itemRows||''}${blankRows}
         <tr class="sum"><td colspan="4" class="lbl">Total</td><td class="r">Rp ${sub.toLocaleString('id-ID')}</td></tr>
-        <tr class="sum"><td colspan="4" class="lbl">PPN 11%</td><td class="r">Rp ${ppn.toLocaleString('id-ID')}</td></tr>
+        ${vatOn?`<tr class="sum"><td colspan="4" class="lbl">PPN 11%</td><td class="r">Rp ${ppn.toLocaleString('id-ID')}</td></tr>`:''}
         <tr class="grand"><td colspan="4" class="lbl">Grand Total</td><td class="r">Rp ${grand.toLocaleString('id-ID')}</td></tr>
       </table>
       <div class="inv-sec-h">TERMS &amp; CONDITIONS</div>
@@ -2652,9 +2768,10 @@ function openDocPrint(docId){
   const items=(d.items&&d.items.length)?d.items:(o.items||[]);
   const t=computeItemTotals(items);
   const hasItems=items.length>0;
+  const docVat = d.pakai_ppn!==false;
   const sub = hasItems ? t.dpp : (Number(d.nilai)||0);
-  const ppn = hasItems ? t.ppn : 0;
-  const total = hasItems ? t.total : (Number(d.nilai)||0);
+  const ppn = (hasItems && docVat) ? t.ppn : 0;
+  const total = hasItems ? (docVat? t.total : t.dpp+t.ongkir) : (Number(d.nilai)||0);
   const due = Number(d.nilai)||total;
   const itemRows=items.map((r,i)=>`<tr><td class="c">${i+1}</td><td class="t">${esc(r.nama)}</td><td class="c">${esc(String(r.qty!=null?r.qty:''))} ${esc(r.satuan||'')}</td><td class="r">${(Number(r.harga)||0).toLocaleString('id-ID')}</td><td class="r">${((Number(r.qty)||0)*(Number(r.harga)||0)).toLocaleString('id-ID')}</td></tr>`).join('');
   const blankRows=Array.from({length:Math.max(0,3-items.length)}).map(()=>`<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td></tr>`).join('');
@@ -2688,11 +2805,11 @@ function openDocPrint(docId){
       <table class="inv-tbl">
         <tr><th style="width:44px;">No.</th><th>Description</th><th style="width:80px;">Qty</th><th style="width:120px;">Unit Price (Rp)</th><th style="width:130px;">Total (Rp)</th></tr>
         ${itemRows||''}${blankRows}
-        <tr class="sum"><td colspan="4" class="lbl">Sub Total</td><td class="r">Rp ${sub.toLocaleString('id-ID')}</td></tr>
-        ${hasItems?`<tr class="sum"><td colspan="4" class="lbl">Tax (11%)</td><td class="r">Rp ${ppn.toLocaleString('id-ID')}</td></tr>`:''}
-        <tr class="grand"><td colspan="4" class="lbl">TOTAL</td><td class="r">Rp ${total.toLocaleString('id-ID')}</td></tr>
+        <tr class="sum"><td colspan="4" class="lbl">Sub Total</td><td class="r">${mcell(sub)}</td></tr>
+        ${hasItems&&docVat?`<tr class="sum"><td colspan="4" class="lbl">Tax (11%)</td><td class="r">${mcell(ppn)}</td></tr>`:''}
+        <tr class="grand"><td colspan="4" class="lbl">TOTAL</td><td class="r">${mcell(total)}</td></tr>
       </table>
-      <div class="inv-due"><span>${meta.due}</span><span>Rp ${due.toLocaleString('id-ID')}</span></div>
+      <div class="inv-due"><span>${meta.due}</span>${mcell(due)}</div>
       <div class="inv-sec-h">PAYMENT INSTRUCTIONS</div>
       <table class="inv-pay">
         <tr><td class="k">Bank Name</td><td>${esc(s.bankName)||'-'}</td></tr>
@@ -2737,7 +2854,8 @@ async function loadBills(){
     const bmap={}; (buyersCache||[]).forEach(b=>bmap[b.id]=b.nama);
     ordersCache=(os||[]).map(o=>({...o, buyer_name:bmap[o.buyer_id]||'—'}));
   }
-  const { data }=await sb.from('supplier_bills').select('id,no_tagihan,po_id,order_id,supplier_id,nilai,tanggal_terima,jatuh_tempo,jenis,status,items,suppliers(nama),orders(no_order)').order('created_at',{ascending:false});
+  let { data, error:bErr }=await sb.from('supplier_bills').select('id,no_tagihan,po_id,order_id,supplier_id,nilai,tanggal_terima,jatuh_tempo,jenis,status,items,pakai_ppn,suppliers(nama),orders(no_order)').order('created_at',{ascending:false});
+  if(bErr){ const r=await sb.from('supplier_bills').select('id,no_tagihan,po_id,order_id,supplier_id,nilai,tanggal_terima,jatuh_tempo,jenis,status,suppliers(nama),orders(no_order)').order('created_at',{ascending:false}); data=r.data; }
   billsCache=(data||[]).map(b=>({...b, supplier_name:b.suppliers?b.suppliers.nama:'—', order_no:b.orders?b.orders.no_order:'—'}));
   const { data:pays }=await sb.from('bill_payments').select('bill_id,jumlah');
   const paid={}; (pays||[]).forEach(p=>{ paid[p.bill_id]=(paid[p.bill_id]||0)+(Number(p.jumlah)||0); });
@@ -2795,6 +2913,7 @@ function viewTagihanNew(){
       <label class="o-field">Jenis</label>
       <select class="o-input" id="billJenis">${jopts}</select>
       ${itemEditorHTML([])}
+      ${vatToggleHTML(true)}
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
         <div><label class="o-field">No tagihan</label><input class="o-input" id="billNo" placeholder="No invoice supplier"></div>
         <div><label class="o-field">Nilai (Rp)</label><input class="o-input" id="billNilai" type="number" inputmode="numeric" placeholder="otomatis dari item" value=""></div>
@@ -2819,7 +2938,8 @@ async function saveBill(){
   const jenis=document.getElementById('billJenis').value||'pemenuhan_po';
   const no=document.getElementById('billNo').value.trim();
   const items=collectItems();
-  const nilai=items.length?computeItemTotals(items).total:(Number(document.getElementById('billNilai').value)||0);
+  const vatOn=poVatOn()!==false;
+  const nilai=items.length?(vatOn?computeItemTotals(items).total:itemsTotal(items)):(Number(document.getElementById('billNilai').value)||0);
   const terima=document.getElementById('billTerima').value||today();
   const tempo=document.getElementById('billTempo').value||null;
   const btn=document.getElementById('billSave'); btn.disabled=true; btn.textContent='Menyimpan…';
@@ -2827,15 +2947,15 @@ async function saveBill(){
   let supplier_id=null;
   if(ssel==='__new'){ if(!snew){ err.textContent='Isi nama supplier baru.'; reset(); return; } const r=await resolveSupplierId(snew); if(r.error){ err.textContent='Gagal simpan supplier: '+r.error; reset(); return; } supplier_id=r.id; }
   else if(ssel){ supplier_id=ssel; } else { err.textContent='Pilih supplier.'; reset(); return; }
-  const { error }=await sb.from('supplier_bills').insert({ no_tagihan:no, order_id, supplier_id, nilai, items, tanggal_terima:terima, jatuh_tempo:tempo, jenis, status:'belum' });
+  const { error }=await sb.from('supplier_bills').insert({ no_tagihan:no, order_id, supplier_id, nilai, items, tanggal_terima:terima, jatuh_tempo:tempo, jenis, status:'belum', pakai_ppn:vatOn });
   if(error){ err.textContent='Gagal simpan tagihan: '+error.message; reset(); return; }
-  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; billView='list'; render();
+  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; billView='list'; render();
 }
 async function deleteBill(id){
   if(!confirm('Hapus tagihan ini? Pembayaran yang tercatat ikut terhapus.')) return;
   const { error }=await sb.from('supplier_bills').delete().eq('id',id);
   if(error){ alert('Gagal hapus: '+error.message); return; }
-  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; render();
+  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; render();
 }
 function bindTagihan(){
   const nb=document.getElementById('billNew'); if(nb) nb.onclick=()=>{ billView='new'; render(); };
@@ -2904,7 +3024,7 @@ async function savePayment(){
   const paidNew=(Number(b.paid)||0)+jumlah;
   const status=paidNew>=(Number(b.nilai)||0)?'lunas':(paidNew>0?'sebagian':'belum');
   await sb.from('supplier_bills').update({status}).eq('id',b.id);
-  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; payingBillId=null; render();
+  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; payingBillId=null; render();
 }
 function billsSection(o){
   if(!canSeeCost()) return '';
@@ -2972,7 +3092,7 @@ async function deleteBuyerPayment(id){
   if(!confirm('Hapus pembayaran ini?')) return;
   const { error }=await sb.from('transactions').delete().eq('id',id);
   if(error){ alert('Gagal hapus: '+error.message); return; }
-  delete orderPayments[openOrderId]; delete orderSummary[openOrderId]; ordersCache=null; orderFinance=null; finReport=null; render();
+  delete orderPayments[openOrderId]; delete orderSummary[openOrderId]; ordersCache=null; orderFinance=null; finReport=null; dashData=null; render();
 }
 function bindBuyerPayForm(){
   const bpp=document.getElementById('bpPct'); if(!bpp) return;
@@ -3004,6 +3124,7 @@ function viewTagihanEdit(){
       <label class="o-field">Jenis</label>
       <select class="o-input" id="billJenis">${jopts}</select>
       ${itemEditorHTML(b.items)}
+      ${vatToggleHTML(b.pakai_ppn)}
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
         <div><label class="o-field">No tagihan</label><input class="o-input" id="billNo" value="${escAttr(b.no_tagihan||'')}"></div>
         <div><label class="o-field">Nilai (Rp)</label><input class="o-input" id="billNilai" type="number" value="${Number(b.nilai)||0}"></div>
@@ -3027,14 +3148,15 @@ async function saveEditBill(){
   const jenis=document.getElementById('billJenis').value||'pemenuhan_po';
   const no=document.getElementById('billNo').value.trim();
   const items=collectItems();
-  const nilai=items.length?computeItemTotals(items).total:(Number(document.getElementById('billNilai').value)||0);
+  const vatOn=poVatOn()!==false;
+  const nilai=items.length?(vatOn?computeItemTotals(items).total:itemsTotal(items)):(Number(document.getElementById('billNilai').value)||0);
   const terima=document.getElementById('billTerima').value||today();
   const tempo=document.getElementById('billTempo').value||null;
   if(!supplier_id){ err.textContent='Pilih supplier.'; return; }
   const btn=document.getElementById('billSaveEdit'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('supplier_bills').update({ no_tagihan:no, order_id, supplier_id, nilai, items, tanggal_terima:terima, jatuh_tempo:tempo, jenis }).eq('id',editBillId);
+  const { error }=await sb.from('supplier_bills').update({ no_tagihan:no, order_id, supplier_id, nilai, items, tanggal_terima:terima, jatuh_tempo:tempo, jenis, pakai_ppn:vatOn }).eq('id',editBillId);
   if(error){ err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan perubahan'; return; }
-  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; billView='list'; editBillId=null; render();
+  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; billView='list'; editBillId=null; render();
 }
 
 // ===== Pengiriman (buku kirim): jenis teh + supplier per item + resi =====
@@ -3363,9 +3485,11 @@ function bindShipTab(){
   bindShipItemEditor();
 }
 
+const ID_MONTHS_2026=['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'].map(m=>m+' 2026');
 function renderMonthSelect(){
-  const sel=document.getElementById('monthSelect');
-  sel.innerHTML=state.months.map(m=>`<option value="${m}" ${m===state.currentMonth?'selected':''}>${m}</option>`).join('');
+  const sel=document.getElementById('monthSelect'); if(!sel) return;
+  if(!ID_MONTHS_2026.includes(state.currentMonth)) state.currentMonth=ID_MONTHS_2026.find(m=>state.months.includes(m))||'April 2026';
+  sel.innerHTML=ID_MONTHS_2026.map(m=>`<option value="${m}" ${m===state.currentMonth?'selected':''}>${m}</option>`).join('');
   sel.onchange=async()=>{ state.currentMonth=sel.value; await ensureMonth(state.currentMonth); editing={}; render(); };
 }
 function render(){
@@ -3387,7 +3511,7 @@ function render(){
   if(activeTab==='kas'){ c.innerHTML=viewKasModule(); bindKasModule(); return; }
   if(activeTab==='biaya'){ c.innerHTML=viewBiayaModule(); return; }
   if(activeTab==='profit'){ c.innerHTML=viewHppModule(); return; }
-  if(activeTab==='penjualan'){ c.innerHTML=viewPenjualanReport(); return; }
+  if(activeTab==='penjualan'){ if(ordersCache===null && !orderLoading) loadOrders(); c.innerHTML=viewPenjualan(); bindEvents(); renderOverlay(); return; }
   if(activeTab==='report'){ c.innerHTML=viewLaporan(); bindLaporan(); return; }
   if(activeTab==='doc_jual'){ c.innerHTML=viewPenjualanLink(); bindPenjualanLink(); return; }
   if(!views[activeTab]){ c.innerHTML=viewPlaceholder(activeTab); return; }
@@ -3460,57 +3584,121 @@ function barChartSVG(){
     bars+=`<text x="${(x+bw/2).toFixed(1)}" y="${H-16}" text-anchor="middle" class="cx">${esc(nm)}</text>`; });
   return `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet" style="font-family:'Inter',sans-serif"><style>.cx{font-size:10px;fill:#94A29A}</style>${grid}${bars}${ylab}</svg>`;
 }
+async function loadDashboard(){
+  const sel=async(t,c)=>{ try{ const { data }=await sb.from(t).select(c); return data||[]; }catch(e){ return []; } };
+  const [os,bs,vs,tx]=await Promise.all([
+    sel('orders','id,no_order,nilai_jual,total_bayar_buyer,status,tanggal_order,buyer_id'),
+    sel('buyers','id,nama'),
+    sel('v_order_summary','id,hpp,laba'),
+    sel('transactions','tanggal,arah,jenis,jumlah')
+  ]);
+  const bmap={}; bs.forEach(b=>bmap[b.id]=b.nama);
+  const hppById={},labaById={}; vs.forEach(v=>{ hppById[v.id]=Number(v.hpp)||0; labaById[v.id]=Number(v.laba)||0; });
+  const nb=os.filter(o=>o.status!=='batal');
+  let penjualan=0,piutang=0,hpp=0,laba=0;
+  const perBuyer={}, perMonth={};
+  nb.forEach(o=>{
+    const nj=Number(o.nilai_jual)||0, by=Number(o.total_bayar_buyer)||0, pi=Math.max(0,nj-by), h=hppById[o.id]||0;
+    penjualan+=nj; piutang+=pi; hpp+=h; laba+=(labaById[o.id]||0);
+    const bn=bmap[o.buyer_id]||'—';
+    const pb=perBuyer[bn]||(perBuyer[bn]={penjualan:0,dibayar:0,piutang:0,hpp:0});
+    pb.penjualan+=nj; pb.dibayar+=by; pb.piutang+=pi; pb.hpp+=h;
+    const ym=(o.tanggal_order||'').slice(0,7); if(ym)(perMonth[ym]||(perMonth[ym]={penjualan:0,biaya:0})).penjualan+=nj;
+  });
+  let masuk=0,keluar=0,biaya=0;
+  tx.forEach(t=>{ const j=Number(t.jumlah)||0, ym=(t.tanggal||'').slice(0,7);
+    if(t.arah==='masuk')masuk+=j; else if(t.arah==='keluar')keluar+=j;
+    if(t.jenis==='biaya_usaha'){ biaya+=j; if(ym)(perMonth[ym]||(perMonth[ym]={penjualan:0,biaya:0})).biaya+=j; }
+  });
+  const ppn=Math.round(penjualan*11/111);
+  dashData={penjualan,piutang,hpp,laba,biaya,saldoKas:masuk-keluar,ppn,labaBersih:(penjualan-ppn)-hpp-biaya,jumlahOrder:nb.length,perBuyer,perMonth};
+  render();
+}
+function ymLabel(ym){ const m=parseInt(ym.slice(5,7),10); return (EN_MONTHS[m-1]||ym).slice(0,3); }
+function dashAreaSVG(perMonth){
+  const keys=Object.keys(perMonth).sort();
+  if(!keys.length) return `<div class="empty" style="padding:24px;text-align:center;color:var(--ink-soft)">Belum ada data order</div>`;
+  const sales=keys.map(k=>perMonth[k].penjualan), exp=keys.map(k=>perMonth[k].biaya);
+  const W=720,H=250,Pl=54,Pr=14,Pt=14,Pb=30,iw=W-Pl-Pr,ih=H-Pt-Pb,n=keys.length;
+  const max=Math.max(1,...sales,...exp);
+  const X=i=> n<=1?Pl+iw/2:Pl+iw*i/(n-1);
+  const Y=v=> Pt+ih*(1-v/max);
+  let grid='',ylab='';
+  for(let g=0;g<=4;g++){ const val=max*g/4,y=Y(val);
+    grid+=`<line x1="${Pl}" y1="${y.toFixed(1)}" x2="${W-Pr}" y2="${y.toFixed(1)}" stroke="#EDEFEC"/>`;
+    ylab+=`<text x="${Pl-8}" y="${(y+4).toFixed(1)}" text-anchor="end" class="cx">${fmtShort(val)}</text>`; }
+  let xlab=''; keys.forEach((k,i)=>{ xlab+=`<text x="${X(i).toFixed(1)}" y="${H-9}" text-anchor="middle" class="cx">${esc(ymLabel(k))}</text>`; });
+  const pts=arr=>arr.map((v,i)=>`${X(i).toFixed(1)},${Y(v).toFixed(1)}`).join(' ');
+  const base=(Pt+ih).toFixed(1);
+  const area=n>1?`<polygon points="${X(0).toFixed(1)},${base} ${pts(sales)} ${X(n-1).toFixed(1)},${base}" fill="#DDF3E5"/>`:'';
+  const sLine=n>1?`<polyline points="${pts(sales)}" fill="none" stroke="#12A150" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`:'';
+  const eLine=n>1?`<polyline points="${pts(exp)}" fill="none" stroke="#E08A00" stroke-width="2" stroke-dasharray="5 4" stroke-linejoin="round"/>`:'';
+  const dots=sales.map((v,i)=>`<circle cx="${X(i).toFixed(1)}" cy="${Y(v).toFixed(1)}" r="${i===n-1?4:2.5}" fill="#12A150"/>`).join('');
+  return `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet" style="font-family:'Inter',sans-serif"><style>.cx{font-size:10px;fill:#94A29A}</style>${grid}${area}${eLine}${sLine}${dots}${ylab}${xlab}</svg>`;
+}
+function dashBarSVG(perBuyer){
+  const data=Object.keys(perBuyer).map(nm=>({name:nm,val:perBuyer[nm].penjualan})).sort((a,b)=>b.val-a.val).slice(0,6);
+  if(!data.length) return `<div class="empty" style="padding:24px;text-align:center;color:var(--ink-soft)">Belum ada buyer</div>`;
+  const W=430,H=250,Pl=46,Pr=8,Pt=14,Pb=48,iw=W-Pl-Pr,ih=H-Pt-Pb,n=data.length;
+  const max=Math.max(1,...data.map(d=>d.val));
+  const gap=iw/n, bw=Math.min(46,gap*0.6);
+  const colors=['#12A150','#2F8FDA','#E08A00','#7C5CD6','#E8455C','#0DA090'];
+  let grid='',ylab='';
+  for(let g=0;g<=4;g++){ const val=max*g/4,y=Pt+ih*(1-g/4);
+    grid+=`<line x1="${Pl}" y1="${y.toFixed(1)}" x2="${W-Pr}" y2="${y.toFixed(1)}" stroke="#EDEFEC"/>`;
+    ylab+=`<text x="${Pl-8}" y="${(y+4).toFixed(1)}" text-anchor="end" class="cx">${fmtShort(val)}</text>`; }
+  let bars='';
+  data.forEach((d,i)=>{ const x=Pl+gap*i+(gap-bw)/2, h=Math.max(0,ih*d.val/max), y=Pt+ih-h;
+    bars+=`<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="4" fill="${colors[i%colors.length]}"/>`;
+    const nm=d.name.length>9?d.name.slice(0,8)+'…':d.name;
+    bars+=`<text x="${(x+bw/2).toFixed(1)}" y="${H-16}" text-anchor="middle" class="cx">${esc(nm)}</text>`; });
+  return `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet" style="font-family:'Inter',sans-serif"><style>.cx{font-size:10px;fill:#94A29A}</style>${grid}${bars}${ylab}</svg>`;
+}
 function viewRingkasan(){
-  const mo=state.currentMonth, pmo=prevMonthOf(mo), np=nettProfit(mo);
-  const sales=totalPenjualanAll(mo), biaya=totalBiayaAll(mo), piut=piutangAll(mo);
-  const rows=state.buyers.map(b=>{
-    const sd=salesData(mo,b.id), p=sd.piutang;
-    const status = p>0.5?`<span class="pill belum">Piutang</span>`:`<span class="pill lunas">Lunas</span>`;
-    return `<tr><td class="txt">${esc(b.name)}</td>
-    <td class="num">${rp(buyerSaldo(mo,b.id))}</td>
-    <td class="num">${rp(totalBiayaBuyer(mo,b.id))}</td>
-    <td class="num">${rp(sd.total)}</td>
-    <td class="num ${p>0.5?'due':''}">${rp(p)}</td>
-    <td class="num">${rp(hppBuyer(mo,b.id))}</td>
-    <td class="num">${status}</td></tr>`;
+  if(dashData===null){ loadDashboard(); return `<div class="o-wrap"><div class="o-card">Memuat dashboard…</div></div>`; }
+  const d=dashData;
+  const kpi=(l,v,cls,icon,neg)=>`<div class="kpi"><div class="kpi-top"><span class="kpi-l">${l}</span><span class="kpi-ic ${cls}">${ic(icon,18)}</span></div><div class="kpi-v ${neg&&v<0?'neg':''}" title="${rp(v)}">${rpKpi(v)}</div></div>`;
+  const rows=Object.keys(d.perBuyer).sort((a,b)=>d.perBuyer[b].penjualan-d.perBuyer[a].penjualan).map(nm=>{
+    const b=d.perBuyer[nm];
+    const status=b.piutang>0.5?`<span class="pill belum">Piutang</span>`:`<span class="pill lunas">Lunas</span>`;
+    return `<tr><td class="txt">${esc(nm)}</td><td class="num">${rp(b.penjualan)}</td><td class="num">${rp(b.dibayar)}</td><td class="num ${b.piutang>0.5?'due':''}">${rp(b.piutang)}</td><td class="num">${rp(b.hpp)}</td><td class="num">${status}</td></tr>`;
   }).join('');
+  const nBuyer=Object.keys(d.perBuyer).length;
   return `
-  <div class="sec-row">
-    <div><h2 class="sec" style="margin:0;">Ringkasan Perusahaan</h2><p class="note" style="margin:3px 0 0;">Indikator kinerja utama — ${esc(mo||'')}</p></div>
-    <div class="seg"><button class="on" type="button">Bulan ini</button></div>
-  </div>
+  <div class="sec-row"><div><h2 class="sec" style="margin:0;">Ringkasan Perusahaan</h2><p class="note" style="margin:3px 0 0;">Indikator kinerja dari seluruh order &amp; transaksi tercatat</p></div></div>
   <div class="kpi-grid">
-    <div class="kpi"><div class="kpi-top"><span class="kpi-l">Total Penjualan</span><span class="kpi-ic g">${ic('trending-up',18)}</span></div><div class="kpi-v" title="${rp(sales)}">${rpKpi(sales)}</div>${kpiTrend(sales, pmo?totalPenjualanAll(pmo):null, true)}</div>
-    <div class="kpi"><div class="kpi-top"><span class="kpi-l">Biaya Usaha</span><span class="kpi-ic gold">${ic('receipt',18)}</span></div><div class="kpi-v" title="${rp(biaya)}">${rpKpi(biaya)}</div>${kpiTrend(biaya, pmo?totalBiayaAll(pmo):null, false)}</div>
-    <div class="kpi"><div class="kpi-top"><span class="kpi-l">Piutang Belum Tertagih</span><span class="kpi-ic red">${ic('coin',18)}</span></div><div class="kpi-v" title="${rp(piut)}">${rpKpi(piut)}</div>${kpiTrend(piut, pmo?piutangAll(pmo):null, false)}</div>
-    <div class="kpi"><div class="kpi-top"><span class="kpi-l">Nett Profit</span><span class="kpi-ic teal">${ic('chart-line',18)}</span></div><div class="kpi-v ${np<0?'neg':''}" title="${rp(np)}">${rpKpi(np)}</div>${kpiTrend(np, pmo?nettProfit(pmo):null, true)}</div>
-    <div class="kpi"><div class="kpi-top"><span class="kpi-l">Saldo Bank</span><span class="kpi-ic blue">${ic('wallet',18)}</span></div><div class="kpi-v" title="${rp(saldoBank(mo))}">${rpKpi(saldoBank(mo))}</div>${kpiTrend(saldoBank(mo), pmo?saldoBank(pmo):null, true)}</div>
+    ${kpi('Total Penjualan', d.penjualan, 'g', 'trending-up')}
+    ${kpi('Laba Bersih Usaha', d.labaBersih, 'teal', 'chart-line', true)}
+    ${kpi('Piutang', d.piutang, 'red', 'coin')}
+    ${kpi('Saldo Kas & Bank', d.saldoKas, 'blue', 'wallet', true)}
+    ${kpi('Total Order', d.jumlahOrder, 'gold', 'clipboard')}
   </div>
   <div class="panel-grid">
     <div class="panel">
-      <div class="panel-head"><div><p class="pt">Performa Keuangan</p><p class="ps">Penjualan vs Biaya usaha per bulan</p></div><span class="kebab">${ic('kebab',18)}</span></div>
-      ${areaChartSVG()}
+      <div class="panel-head"><div><p class="pt">Performa Keuangan</p><p class="ps">Penjualan vs Biaya usaha per bulan</p></div></div>
+      ${dashAreaSVG(d.perMonth)}
       <div class="legend"><span><span class="sw" style="background:#12A150"></span>Penjualan</span><span><span class="sw" style="background:#E08A00"></span>Biaya usaha</span></div>
     </div>
     <div class="panel">
-      <div class="panel-head"><div><p class="pt">Penjualan per Buyer</p><p class="ps">Bulan ${esc(mo||'')}</p></div><span class="kebab">${ic('kebab',18)}</span></div>
-      ${barChartSVG()}
+      <div class="panel-head"><div><p class="pt">Penjualan per Buyer</p><p class="ps">Seluruh order</p></div></div>
+      ${dashBarSVG(d.perBuyer)}
     </div>
   </div>
-  <div class="sec-row"><h2 class="sec" style="font-size:16px;margin:0;">Rincian per buyer</h2><span class="meta">${state.buyers.length} buyer</span></div>
+  <div class="sec-row"><h2 class="sec" style="font-size:16px;margin:0;">Rincian per buyer</h2><span class="meta">${nBuyer} buyer</span></div>
   <div class="card">
     <table>
-      <tr><th>Buyer</th><th class="num">Saldo kas</th><th class="num">Biaya usaha</th><th class="num">Penjualan</th><th class="num">Piutang</th><th class="num">HPP</th><th class="num">Status</th></tr>
-      ${rows||'<tr><td colspan="7" class="empty">Belum ada buyer</td></tr>'}
+      <tr><th>Buyer</th><th class="num">Penjualan</th><th class="num">Dibayar</th><th class="num">Piutang</th><th class="num">HPP</th><th class="num">Status</th></tr>
+      ${rows||'<tr><td colspan="6" class="empty">Belum ada order</td></tr>'}
     </table>
   </div>
-  <div class="sec-row"><h2 class="sec" style="font-size:16px;margin:0;">Laba rugi</h2></div>
+  <div class="sec-row"><h2 class="sec" style="font-size:16px;margin:0;">Laba rugi ringkas</h2></div>
   <div class="card">
     <table>
-      <tr><td class="txt">HPP semua buyer</td><td class="num">${rp(hppAll(mo))}</td></tr>
-      <tr><td class="txt">Investor</td><td class="num">${rp(investorsTotal(mo))}</td></tr>
-      <tr><td class="txt">Petty cash</td><td class="num">${rp(pettyCash(mo))}</td></tr>
-      <tr class="total"><td>Nett profit</td><td class="num ${np>=0?'':'neg'}">${rp(np)}</td></tr>
+      <tr><td class="txt">Penjualan (termasuk PPN)</td><td class="num">${rp(d.penjualan)}</td></tr>
+      <tr><td class="txt">− PPN 11%</td><td class="num">${rp(d.ppn)}</td></tr>
+      <tr><td class="txt">− HPP</td><td class="num">${rp(d.hpp)}</td></tr>
+      <tr><td class="txt">− Biaya usaha</td><td class="num">${rp(d.biaya)}</td></tr>
+      <tr class="total"><td>Laba bersih usaha</td><td class="num ${d.labaBersih>=0?'':'neg'}">${rp(d.labaBersih)}</td></tr>
     </table>
   </div>`;
 }
@@ -3702,6 +3890,11 @@ function orderHeaderForm(buyer,o){
   return `
   <div class="osection" style="background:#F6F1E4;">
     <div class="shead" style="margin-bottom:10px;">Edit data order</div>
+    ${(ordersCache&&ordersCache.length)?`<div style="margin-bottom:10px;padding:10px;background:#EEF5EF;border:1px solid #CFE3D3;border-radius:8px">
+      <label style="display:block;font-size:12px;font-weight:600;color:#1D6B4F;margin-bottom:4px">🔗 Ambil dari Daftar Order (item terisi otomatis)</label>
+      <select id="oLink_${k}" data-link-order="${buyer.id}:${o.id}" style="width:100%"><option value="">— pilih No. Order —</option>${ordersCache.map(od=>`<option value="${od.id}">${esc(od.no_order)} · ${esc(od.buyer_name||'')}${Number(od.nilai_jual)>0?` · ${rp(od.nilai_jual)}`:''}</option>`).join('')}</select>
+      <p style="font-size:11px;color:var(--ink-soft);margin:5px 0 0">Pilih order → item &amp; No. PO otomatis diisi dari Daftar Order. Bisa diedit lagi setelahnya.</p>
+    </div>`:''}
     <div class="fieldgrid">
       <div><label>Tanggal order</label><input id="oOrder_${k}" type="date" value="${esc(o.tglOrder)}"></div>
       <div><label>Tanggal kirim / serah</label><input id="oKirim_${k}" type="date" value="${esc(o.tglKirim)}"></div>
@@ -3728,6 +3921,7 @@ function itemForm(o,row){
   return `
   <div class="form-row">
     <input id="iDesc_${k}" placeholder="Deskripsi item" value="${row?esc(row.desc):''}" style="min-width:150px;">
+    <input id="iPack_${k}" placeholder="Pack size (mis. 100 packs x 134 gr)" value="${row?esc(row.pack||''):''}" style="min-width:140px;">
     <input id="iQty_${k}" type="number" placeholder="Qty" value="${row?esc(row.qty):''}" style="max-width:70px;">
     <select id="iUnit_${k}" style="max-width:85px;">${unitOpts(row?row.unit:'KG')}</select>
     <input id="iHarga_${k}" type="number" placeholder="Harga satuan" value="${row?esc(row.harga):''}">
@@ -3927,7 +4121,7 @@ async function saveSampleGratisCost(){
   const btn=document.getElementById('sgSave'); btn.disabled=true; btn.textContent='Menyimpan…';
   const { error }=await sb.from('transactions').insert({ tanggal:today(), arah:'keluar', jenis:'biaya_usaha', jumlah, order_id:oid, kategori:'Sample gratis / marketing', catatan:note||null });
   if(error){ if(err) err.textContent='Gagal: '+error.message; btn.disabled=false; btn.textContent='Catat sebagai Biaya usaha (marketing)'; return; }
-  delete orderSummary[oid]; orderFinance=null; finReport=null;
+  delete orderSummary[oid]; orderFinance=null; finReport=null; dashData=null;
   document.getElementById('sgCost').value=''; document.getElementById('sgNote').value='';
   btn.disabled=false; btn.textContent='Catat sebagai Biaya usaha (marketing)';
   if(err){ err.style.color='#1D6B4F'; err.textContent='Tersimpan sebagai Biaya usaha ✓'; }
@@ -4015,7 +4209,7 @@ function viewPenjualan(){
     const orders=getOrders(mo,b.id);
     const cards=orders.map(o=>orderCard(b,o)).join('') || '<div class="empty">Belum ada order.</div>';
     return `
-      <h4 class="buyerhead">${b.name}<button class="addbtn" data-add-order="${b.id}">+ Order baru</button></h4>
+      <h4 class="buyerhead">${b.name}<span style="display:inline-flex;gap:8px"><button class="addbtn" data-add-order="${b.id}">+ Order baru</button><button class="addbtn" data-del-buyer="${b.id}" style="background:#fff;color:var(--danger);border:1px solid #E3B9B3">hapus buyer</button></span></h4>
       ${cards}`;
   }).join('');
   return `
@@ -4174,9 +4368,9 @@ function renderOverlay(){
   const docDate = isPI ? o.tglOrder : (o.invoiceDate||o.tglKirim||o.tglOrder);
 
   const itemRows=(o.items||[]).map((r,i)=>`
-    <tr><td class="c">${i+1}</td><td class="t">${esc(r.desc)}</td><td class="c">${r.qty} ${r.unit||''}</td>
+    <tr><td class="c">${i+1}</td><td class="t">${esc(r.desc)}</td><td class="t">${esc(r.pack||'')}</td><td class="c">${r.qty} ${r.unit||''}</td>
     <td class="r">${(Number(r.harga)||0).toLocaleString('id-ID')}</td><td class="r">${(r.qty*r.harga).toLocaleString('id-ID')}</td></tr>`).join('');
-  const blankRows = Array.from({length:Math.max(0,3-(o.items||[]).length)}).map(()=>`<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td></tr>`).join('');
+  const blankRows = Array.from({length:Math.max(0,3-(o.items||[]).length)}).map(()=>`<tr><td class="c">&nbsp;</td><td></td><td></td><td></td><td></td><td></td></tr>`).join('');
 
   const notesArr = defaultNotes(o,isPI);
   const extraNotes = (s.notes||'').trim();
@@ -4257,16 +4451,16 @@ function renderOverlay(){
           </div>
 
           <table class="inv-tbl">
-            <tr><th style="width:44px;">No.</th><th>Description</th><th style="width:70px;">Qty</th><th style="width:110px;">Unit Price (Rp)</th><th style="width:130px;">Total (Rp)</th></tr>
+            <tr><th style="width:38px;">No.</th><th>Description</th><th style="width:130px;">Pack Size</th><th style="width:64px;">Qty</th><th style="width:104px;">Unit Price (Rp)</th><th style="width:140px;">Total (Rp)</th></tr>
             ${itemRows||''}
             ${blankRows}
-            <tr class="sum"><td colspan="4" class="lbl">Sub Total</td><td class="r">Rp ${c.subtotalBarang.toLocaleString('id-ID')}</td></tr>
-            <tr class="sum"><td colspan="4" class="lbl">Tax (11%)</td><td class="r">Rp ${Math.round(c.ppn).toLocaleString('id-ID')}</td></tr>
-            <tr class="sum"><td colspan="4" class="lbl">Shipping</td><td class="r">Rp ${c.ongkir.toLocaleString('id-ID')}</td></tr>
-            <tr class="grand"><td colspan="4" class="lbl">TOTAL</td><td class="r">Rp ${Math.round(c.totalTagihan).toLocaleString('id-ID')}</td></tr>
+            <tr class="sum"><td colspan="5" class="lbl">Sub Total</td><td class="r">${mcell(c.subtotalBarang)}</td></tr>
+            <tr class="sum"><td colspan="5" class="lbl">Tax (11%)</td><td class="r">${mcell(c.ppn)}</td></tr>
+            <tr class="sum"><td colspan="5" class="lbl">Shipping</td><td class="r">${mcell(c.ongkir)}</td></tr>
+            <tr class="grand"><td colspan="5" class="lbl">TOTAL</td><td class="r">${mcell(c.totalTagihan)}</td></tr>
           </table>
 
-          <div class="inv-due"><span>AMOUNT DUE NOW — ${isPI?`${o.dpPct||0}% DOWN PAYMENT`:`${100-(o.dpPct||0)}% FINAL PAYMENT`}</span><span>Rp ${(isPI?dpNow:remaining).toLocaleString('id-ID')}</span></div>
+          <div class="inv-due"><span>AMOUNT DUE NOW — ${isPI?`${o.dpPct||0}% DOWN PAYMENT`:`${100-(o.dpPct||0)}% FINAL PAYMENT`}</span>${mcell(isPI?dpNow:remaining)}</div>
           ${isPI
             ? `<div class="inv-note-line">Due max. ${o.tempoDpHari!=null?o.tempoDpHari:3} days after PI date. Remaining Rp ${remaining.toLocaleString('id-ID')} (Final Payment) will be billed via a separate Invoice after the goods are shipped.</div>`
             : `<div class="inv-breakdown"><span>Total Order Value</span><span>Rp ${Math.round(c.totalTagihan).toLocaleString('id-ID')}</span></div>
@@ -4362,6 +4556,26 @@ function bindEvents(){
     if(el.dataset.confirming!=='1'){ el.dataset.confirming='1'; el.textContent='klik lagi'; setTimeout(()=>{el.dataset.confirming='0';el.textContent='hapus';},3000); return; }
     state.sales[mo][b].orders=state.sales[mo][b].orders.filter(o=>o.id!==oid); await saveSales(mo,b); render();
   });
+  c.querySelectorAll('[data-del-buyer]').forEach(el=>el.onclick=async()=>{
+    const id=el.dataset.delBuyer;
+    if(el.dataset.confirming!=='1'){ el.dataset.confirming='1'; el.textContent='klik lagi utk hapus'; setTimeout(()=>{el.dataset.confirming='0';el.textContent='hapus buyer';},3000); return; }
+    state.buyers=state.buyers.filter(x=>x.id!==id);
+    state.months.forEach(mo=>{ if(state.sales[mo]) delete state.sales[mo][id]; if(state.cash[mo]) delete state.cash[mo][id]; });
+    await saveBuyers(); render();
+  });
+  // Ambil item dari Daftar Order (Supabase) -> isi otomatis ke order buku-kas
+  c.querySelectorAll('[data-link-order]').forEach(el=>el.onchange=async()=>{
+    const oid=el.value; if(!oid) return;
+    const src=(ordersCache||[]).find(x=>x.id===oid); if(!src) return;
+    const mo=state.currentMonth; const [b,orderId]=el.dataset.linkOrder.split(':');
+    const ord=((state.sales[mo]||{})[b]||{}).orders?state.sales[mo][b].orders.find(o=>o.id===orderId):null; if(!ord) return;
+    (src.items||[]).forEach(it=>{
+      if(isOngkir(it)){ ord.ongkir=(Number(ord.ongkir)||0)+(Number(it.harga)||0); return; }
+      ord.items.push({id:uid(), desc:it.nama||'', pack:it.packaging||it.pack||'', qty:Number(it.qty)||0, unit:it.satuan||'KG', harga:Number(it.harga)||0, ppn:11});
+    });
+    if(!ord.noPO && (src.po_masuk_no||src.no_order)) ord.noPO=src.po_masuk_no||src.no_order;
+    await saveSales(mo,b); render();
+  });
 
   // items
   c.querySelectorAll('[data-add-item]').forEach(el=>el.onclick=()=>itemSubmit(el.dataset.addItem,null));
@@ -4380,7 +4594,7 @@ function bindEvents(){
   c.querySelectorAll('[data-update-pay]').forEach(el=>el.onclick=()=>paySubmit(el.dataset.updatePay,el.dataset.row));
   c.querySelectorAll('[data-edit-pay]').forEach(el=>el.onclick=()=>{ const[oid,pid]=el.dataset.editPay.split(':'); editing['pay_'+oid]=pid; render(); });
   c.querySelectorAll('[data-cancel-pay]').forEach(el=>el.onclick=()=>{ delete editing['pay_'+el.dataset.cancelPay]; render(); });
-  c.querySelectorAll('[data-del-pay]').forEach(el=>el.onclick=async()=>{ const[oid,pid]=el.dataset.delPay.split(':'); const mo=state.currentMonth; const b=findBuyerOfOrder(mo,oid); const o=findOrder(mo,b,oid); o.payments=o.payments.filter(x=>x.id!==pid); await saveSales(mo,b); render(); });
+  c.querySelectorAll('[data-del-pay]').forEach(el=>el.onclick=async()=>{ const[oid,pid]=el.dataset.delPay.split(':'); const mo=state.currentMonth; const b=findBuyerOfOrder(mo,oid); const o=findOrder(mo,b,oid); const p=(o.payments||[]).find(x=>x.id===pid); if(p&&p.txId){ try{ await sb.from('transactions').delete().eq('id',p.txId); }catch(e){} } o.payments=o.payments.filter(x=>x.id!==pid); await saveSales(mo,b); orderFinance=null; finReport=null; dashData=null; ledgerCache=null; render(); });
 
   // investor / petty
   const addInv=c.querySelector('[data-add-inv]'); if(addInv) addInv.onclick=()=>invSubmit(null);
@@ -4424,7 +4638,7 @@ async function itemSubmit(orderId,rowId){
   const ongkirEl=document.getElementById('iOngkir_'+orderId);
   if(ongkirEl) o.ongkir=Number(ongkirEl.value)||0; // ongkir saved from the item row
   if(!desc||!qty){ if(ongkirEl){ await saveSales(mo,b); render(); } return; }
-  const data={desc,qty,unit:sel('iUnit_'+orderId),harga:num('iHarga_'+orderId),ppn:num('iPpn_'+orderId)};
+  const data={desc,pack:val('iPack_'+orderId),qty,unit:sel('iUnit_'+orderId),harga:num('iHarga_'+orderId),ppn:num('iPpn_'+orderId)};
   if(rowId){ const i=o.items.findIndex(x=>x.id===rowId); if(i>=0) o.items[i]={...o.items[i],...data}; delete editing['item_'+orderId]; }
   else o.items.push({id:uid(),...data});
   await saveSales(mo,b); render();
@@ -4433,9 +4647,22 @@ async function paySubmit(orderId,rowId){
   const mo=state.currentMonth, b=findBuyerOfOrder(mo,orderId), o=findOrder(mo,b,orderId);
   const nominal=num('pNom_'+orderId); if(!nominal) return;
   const data={tgl:val('pTgl_'+orderId),jenis:sel('pJenis_'+orderId),nominal,noKwitansi:val('pKw_'+orderId)};
-  if(rowId){ const i=o.payments.findIndex(x=>x.id===rowId); if(i>=0) o.payments[i]={...o.payments[i],...data}; delete editing['pay_'+orderId]; }
-  else o.payments.push({id:uid(),...data});
-  await saveSales(mo,b); render();
+  // Jembatan ke Supabase: pembayaran buku-kas -> transaksi (masuk ke Arus Kas/Laporan)
+  const buyerNm=(state.buyers.find(x=>x.id===b)||{}).name||'';
+  const txPayload={ tanggal:data.tgl||today(), arah:'masuk', jenis:(data.jenis==='DP'?'dp':'pelunasan'), jumlah:nominal, kategori:'Penjualan', catatan:`${buyerNm} · ${o.noInvoice||o.noPI||'-'}` };
+  if(rowId){
+    const i=o.payments.findIndex(x=>x.id===rowId);
+    if(i>=0){ const old=o.payments[i]; o.payments[i]={...old,...data};
+      if(old.txId){ try{ await sb.from('transactions').update(txPayload).eq('id',old.txId); }catch(e){} } }
+    delete editing['pay_'+orderId];
+  } else {
+    let txId=null;
+    try{ const { data:tx }=await sb.from('transactions').insert(txPayload).select('id').single(); txId=tx?tx.id:null; }catch(e){}
+    o.payments.push({id:uid(),...data,txId});
+  }
+  await saveSales(mo,b);
+  orderFinance=null; finReport=null; dashData=null; ledgerCache=null;
+  render();
 }
 async function invSubmit(invId){
   const mo=state.currentMonth;
