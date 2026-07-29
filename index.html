@@ -568,26 +568,32 @@ function migrateSales(sd){
 }
 
 async function loadAll(){
-  state.months=(await safeGet('months'))||['April 2026'];
+  // ambil semua key utama sekaligus (paralel) — bukan satu-satu
+  const [months,buyers,capital,invSeq,piSeq,storedSeller]=await Promise.all([
+    safeGet('months'),safeGet('buyers'),safeGet('capital'),safeGet('invSeq'),safeGet('piSeq'),safeGet('seller')
+  ]);
+  state.months=months||['April 2026'];
   state.currentMonth=state.months[0];
-  state.buyers=(await safeGet('buyers'))||[];
-  state.capital=(await safeGet('capital'))||[];
-  state.invSeq=(await safeGet('invSeq'))||1077;
-  state.piSeq=(await safeGet('piSeq'))||1045;
-  const storedSeller=await safeGet('seller');
+  state.buyers=buyers||[];
+  state.capital=capital||[];
+  state.invSeq=invSeq||1077;
+  state.piSeq=piSeq||1045;
   state.seller={...SELLER_DEFAULT, ...(storedSeller||{})};
   if(storedSeller && storedSeller.nama && !storedSeller.brand){ state.seller.brand=storedSeller.nama; }
   state.settings={};
-  for(const mo of state.months){ await ensureMonth(mo); }
+  await ensureMonth(state.currentMonth); // hanya bulan aktif; bulan lain dimuat saat dipilih
   render();
 }
 async function ensureMonth(mo){
   if(!state.cash[mo]) state.cash[mo]={};
   if(!state.sales[mo]) state.sales[mo]={};
-  for(const b of state.buyers){
-    if(!state.cash[mo][b.id]) state.cash[mo][b.id]=(await safeGet('cash:'+mo+':'+b.id))||[];
-    if(!state.sales[mo][b.id]) state.sales[mo][b.id]=migrateSales(await safeGet('sales:'+mo+':'+b.id));
-  }
+  // muat data cash & sales tiap buyer secara PARALEL (jauh lebih cepat)
+  await Promise.all((state.buyers||[]).map(async b=>{
+    const need=[state.cash[mo][b.id]?null:safeGet('cash:'+mo+':'+b.id), state.sales[mo][b.id]?null:safeGet('sales:'+mo+':'+b.id)];
+    const [c,s]=await Promise.all(need);
+    if(!state.cash[mo][b.id]) state.cash[mo][b.id]=c||[];
+    if(!state.sales[mo][b.id]) state.sales[mo][b.id]=migrateSales(s);
+  }));
   if(!state.settings[mo]) state.settings[mo]=(await safeGet('settings:'+mo))||{investors:[],pettyCash:0};
 }
 async function ensureBuyerData(mo,id){
