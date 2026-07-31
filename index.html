@@ -74,18 +74,19 @@
   .monthbar button:hover{background:#2B4F44;}
   .content{flex:1;min-width:0;padding:22px 24px 60px;}
   /* ===== KPI cards ===== */
-  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(178px,1fr));gap:14px;margin-bottom:16px;}
-  .kpi{background:#fff;border:1px solid #E7EAE7;border-radius:14px;padding:16px 18px;box-shadow:0 1px 2px rgba(30,50,40,.04);}
-  .kpi-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
-  .kpi-l{font-size:11px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-soft);}
-  .kpi-ic{width:38px;height:38px;border-radius:11px;background:#E1F3E8;color:#12A150;display:flex;align-items:center;justify-content:center;font-size:18px;flex:none;}
+  .kpi-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:11px;margin-bottom:16px;}
+  .kpi{background:#fff;border:1px solid #E7EAE7;border-radius:12px;padding:12px 14px;box-shadow:0 1px 2px rgba(30,50,40,.04);transition:box-shadow .15s,transform .15s,border-color .15s;}
+  .kpi:hover{box-shadow:0 6px 16px rgba(30,50,40,.09);transform:translateY(-2px);border-color:#D6DED8;}
+  .kpi-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px;}
+  .kpi-l{font-size:10px;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--ink-soft);line-height:1.25;}
+  .kpi-ic{width:30px;height:30px;border-radius:9px;background:#E1F3E8;color:#12A150;display:flex;align-items:center;justify-content:center;font-size:15px;flex:none;}
   .kpi-ic.g{background:#DBF3E3;color:#12A150;}
   .kpi-ic.gold{background:#FDEFD3;color:#E08A00;}
   .kpi-ic.red{background:#FDE4E7;color:#E8455C;}
   .kpi-ic.teal{background:#D6F1EE;color:#0DA090;}
   .kpi-ic.violet{background:#EAE6FB;color:#7C5CD6;}
   .kpi-ic.blue{background:#DDEEFB;color:#2F8FDA;}
-  .kpi-v{font-family:'IBM Plex Mono',monospace;font-size:23px;font-weight:600;color:var(--tea-dark);letter-spacing:-.02em;white-space:nowrap;}
+  .kpi-v{font-family:'IBM Plex Mono',monospace;font-size:18px;font-weight:600;color:var(--tea-dark);letter-spacing:-.02em;white-space:nowrap;}
   .kpi-trend{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:600;margin-top:9px;}
   .kpi-trend i{font-size:15px;}
   .kpi-trend .lbl{font-weight:400;color:var(--ink-soft);}
@@ -460,15 +461,15 @@ const NAV = [
     {id:'pembelian',     label:'Pembelian',     roles:['owner','keuangan','staff']},
   ]},
   {id:'nav_keuangan', label:'Keuangan', icon:'wallet', children:[
+    {id:'penjualan',  label:'Penjualan',        roles:['owner','keuangan']},
+    {id:'kas',        label:'Arus Kas',         roles:['owner','keuangan']},
+    {id:'hutang',     label:'Hutang',           roles:['owner','keuangan']},
+    {id:'tagihan',    label:'Tagihan Supplier', roles:['owner','keuangan','staff']},
+    {id:'biaya',      label:'Biaya Usaha',      roles:['owner','keuangan']},
+    {id:'profit',     label:'HPP',              roles:['owner','keuangan']},
+    {id:'pembayaran', label:'Pembayaran',       roles:['owner','keuangan']},
     {id:'modal',      label:'Modal',            roles:['owner','keuangan']},
     {id:'aset',       label:'Aset',             roles:['owner','keuangan']},
-    {id:'hutang',     label:'Hutang',           roles:['owner','keuangan']},
-    {id:'kas',        label:'Arus Kas',         roles:['owner','keuangan']},
-    {id:'biaya',      label:'Biaya Usaha',      roles:['owner','keuangan']},
-    {id:'penjualan',  label:'Penjualan',        roles:['owner','keuangan']},
-    {id:'profit',     label:'HPP',              roles:['owner','keuangan']},
-    {id:'tagihan',    label:'Tagihan Supplier', roles:['owner','keuangan','staff']},
-    {id:'pembayaran', label:'Pembayaran',       roles:['owner','keuangan']},
   ]},
   {id:'nav_report', label:'Laporan', icon:'chart-bar', children:[
     {id:'report', label:'Laporan Keuangan', roles:['owner','keuangan']},
@@ -781,11 +782,17 @@ let billsCache = null;
 let billView = 'list';
 let pembelianFormOpen = false;
 let pembelianJenis = 'pemenuhan_po'; // default form Pembelian
+let pembelianBuyer = 'all'; // filter Pembelian per buyer
+function setPembelianBuyer(v){ pembelianBuyer=v; render(); }
+let biayaOrder = 'all'; // filter Biaya Usaha per order
+function setBiayaOrder(v){ biayaOrder=v; render(); }
 let billLoading = false;
+let poBillBackfilled = false; // sekali per sesi: buat tagihan (hutang) untuk PO lama yang belum punya
 let payingBillId = null;
 let editBillId = null;
 let orderPayments = {};
 let buyerPayFormOpen = false;
+let editBuyerPayId = null;
 let pjOrderId = null;
 // ── Pengiriman (buku kirim) ──
 let shipCache = null;
@@ -902,9 +909,9 @@ async function loadOrders(){
   const { data:bs } = await sb.from('buyers').select('id,nama').order('nama');
   buyersCache = bs||[];
   let { data:os, error } = await sb.from('orders')
-    .select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,items_sample,po_masuk_no,pakai_ppn')
+    .select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,tanggal_serah_terima,buyer_id,catatan,items,items_sample,po_masuk_no,pakai_ppn')
     .order('created_at',{ascending:false});
-  if(error){ // fallback bila kolom pakai_ppn belum ada (SQL belum dijalankan)
+  if(error){ // fallback bila kolom tanggal_serah_terima / pakai_ppn belum ada (SQL belum dijalankan)
     const r=await sb.from('orders').select('id,no_order,status,nilai_jual,nilai_sample,total_bayar_buyer,tanggal_order,buyer_id,catatan,items,items_sample,po_masuk_no').order('created_at',{ascending:false});
     os=r.data; if(r.error) console.error('load orders', r.error);
   }
@@ -1025,6 +1032,8 @@ function viewOrderNew(){
       <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Ada rincian item? Nilai jual otomatis dari total item + ongkir. Isi manual hanya bila tanpa rincian.</p>
       <label class="o-field">Tanggal order</label>
       <input class="o-input" id="oTgl" type="date" value="${today()}">
+      <label class="o-field">Tgl serah terima barang (opsional)</label>
+      <input class="o-input" id="oSerah" type="date" value="">
       <label class="o-field">Catatan (opsional)</label>
       <input class="o-input" id="oCatatan" placeholder="">
       <div id="oErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:10px"></div>
@@ -1079,7 +1088,7 @@ function viewOrderCard(){
       <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">
         <h2 class="o-title" style="margin:0">${o.no_order} · ${o.buyer_name}</h2>${statusBadge(o.status)}
       </div>
-      <p style="margin:0 0 14px;color:var(--ink-soft);font-size:12.5px">Tanggal order ${fmtLong(o.tanggal_order)}${(isPO&&o.po_masuk_no)?` · <b style="color:var(--tea-dark)">PO buyer: ${esc(o.po_masuk_no)}</b>`:''}${o.catatan?(' · '+esc(o.catatan)):''}</p>
+      <p style="margin:0 0 14px;color:var(--ink-soft);font-size:12.5px">Tanggal order ${fmtLong(o.tanggal_order)}${o.tanggal_serah_terima?` · Serah terima: <b style="color:var(--tea-dark)">${fmtLong(o.tanggal_serah_terima)}</b>`:''}${(isPO&&o.po_masuk_no)?` · <b style="color:var(--tea-dark)">PO buyer: ${esc(o.po_masuk_no)}</b>`:''}${o.catatan?(' · '+esc(o.catatan)):''}</p>
       <div class="o-pipe">${pipe}</div>
       <table class="o-kv">
         ${(Number(o.nilai_sample)>0||o.status==='sample')?`<tr><td>Nilai sample</td><td>${rp(o.nilai_sample)}</td></tr>`:''}
@@ -1087,14 +1096,13 @@ function viewOrderCard(){
         <tr><td>Status bayar</td><td style="color:${nilai>0&&bayar>=nilai?'#1D6B4F':(bayar>0?'#8A5B0E':'var(--ink-soft)')}">${statusBayar}</td></tr>
         ${costCards}
       </table>
-      <p style="margin:10px 0 0;color:var(--ink-soft);font-size:12px">Pembayaran buyer (DP &amp; pelunasan) dicatat di kartu ini (bawah). Tagihan supplier ada di menu <b>Tagihan Supplier</b>.</p>
+      <p style="margin:10px 0 0;color:var(--ink-soft);font-size:12px">Pembayaran buyer (DP &amp; pelunasan) dicatat di menu <b>Penjualan</b> (bagian keuangan). Order ini untuk data operasional &amp; PO.</p>
     </div>
     ${itemsDisplayCard('Item order', o.items)}
     ${(o.items_sample&&o.items_sample.length)?itemsDisplayCard('Histori item (dari sample)', o.items_sample):''}
     ${sampleViewRO(o)}
     ${talNote}
     ${poSection(o)}
-    ${paymentsSection(o)}
   </div>`;
 }
 
@@ -1156,9 +1164,10 @@ function bindOrderModule(){
     document.querySelectorAll('[data-deldoc]').forEach(b=>b.onclick=()=>deleteDoc(b.dataset.deldoc));
     const pac=document.getElementById('poAddCard'); if(pac) pac.onclick=()=>{ poFormOpen=true; render(); };
     bindPOCommon(true);
-    const bpa=document.getElementById('bpAdd'); if(bpa) bpa.onclick=()=>{ buyerPayFormOpen=true; render(); };
-    const bpc=document.getElementById('bpCancel'); if(bpc) bpc.onclick=()=>{ buyerPayFormOpen=false; render(); };
+    const bpa=document.getElementById('bpAdd'); if(bpa) bpa.onclick=()=>{ buyerPayFormOpen=true; editBuyerPayId=null; render(); };
+    const bpc=document.getElementById('bpCancel'); if(bpc) bpc.onclick=()=>{ buyerPayFormOpen=false; editBuyerPayId=null; render(); };
     const bps=document.getElementById('bpSave'); if(bps) bps.onclick=saveBuyerPayment;
+    document.querySelectorAll('[data-editpay]').forEach(b=>b.onclick=()=>{ editBuyerPayId=b.dataset.editpay; buyerPayFormOpen=false; render(); });
     document.querySelectorAll('[data-delpay]').forEach(b=>b.onclick=()=>deleteBuyerPayment(b.dataset.delpay));
     bindBuyerPayForm();
   }
@@ -1171,7 +1180,7 @@ async function deleteOrder(){
   const oid=openOrderId;
   const { error }=await sb.rpc('delete_order_cascade', { p_order: oid });
   if(error){ alert('Gagal hapus: '+error.message); return; }
-  orderSummary={}; poCache=null; billsCache=null; shipCache=null; orderFinance=null; finReport=null; dashData=null;
+  orderSummary={}; poCache=null; billsCache=null; shipCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null;
   delete orderPayments[oid]; delete orderDocs[oid];
   ordersCache=null; orderView='list'; openOrderId=null; render();
 }
@@ -1204,6 +1213,8 @@ function viewOrderEdit(){
       <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Ada rincian item? Nilai jual otomatis dari total item + ongkir.</p>
       <label class="o-field">Tanggal order</label>
       <input class="o-input" id="oTgl" type="date" value="${o.tanggal_order||today()}">
+      <label class="o-field">Tgl serah terima barang (opsional)</label>
+      <input class="o-input" id="oSerah" type="date" value="${o.tanggal_serah_terima||''}">
       <label class="o-field">Catatan (opsional)</label>
       <input class="o-input" id="oCatatan" value="${escAttr(o.catatan||'')}">
       <div id="oErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:10px"></div>
@@ -1230,10 +1241,11 @@ async function saveEditOrder(){
   if(!no){ err.textContent='No order wajib diisi.'; return; }
   if(!buyer_id){ err.textContent='Pilih buyer.'; return; }
   const btn=document.getElementById('oSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('orders').update({ no_order:no, buyer_id, nilai_jual:nilai, nilai_sample:nilaiSample, tanggal_order:tgl, catatan:cat, status, items, po_masuk_no:poMasuk, pakai_ppn:vatOn }).eq('id',openOrderId);
+  const serah=(document.getElementById('oSerah')||{}).value||null;
+  const { error }=await orderWrite({ no_order:no, buyer_id, nilai_jual:nilai, nilai_sample:nilaiSample, tanggal_order:tgl, tanggal_serah_terima:serah, catatan:cat, status, items, po_masuk_no:poMasuk, pakai_ppn:vatOn }, openOrderId);
   if(error){ err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan perubahan'; return; }
   delete orderSummary[openOrderId];
-  ordersCache=null; orderView='card'; orderFinance=null; finReport=null; dashData=null; render();
+  ordersCache=null; orderView='card'; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render();
 }
 
 async function resolveBuyerId(name){
@@ -1243,6 +1255,15 @@ async function resolveBuyerId(name){
   if(error) return { error:error.message };
   buyersCache.push(nb);
   return { id:nb.id };
+}
+// Tulis order; kalau kolom tanggal_serah_terima belum ada di DB, ulangi tanpa kolom itu (aman).
+async function orderWrite(payload, id){
+  let res = id ? await sb.from('orders').update(payload).eq('id',id) : await sb.from('orders').insert(payload);
+  if(res.error && /tanggal_serah_terima/i.test(res.error.message||'')){
+    const rest={...payload}; delete rest.tanggal_serah_terima;
+    res = id ? await sb.from('orders').update(rest).eq('id',id) : await sb.from('orders').insert(rest);
+  }
+  return res;
 }
 async function saveNewOrder(){
   const err=document.getElementById('oErr'); err.textContent='';
@@ -1270,7 +1291,7 @@ async function saveNewOrder(){
     const items_sample=(sampleOrder&&Array.isArray(sampleOrder.items)&&sampleOrder.items.length)?sampleOrder.items:(sampleOrder?sampleOrder.items_sample:null)||[];
     const { error }=await sb.from('orders').update({ status:'po', nilai_jual:nilai, po_masuk_no:poMasuk, items, items_sample, catatan:cat, pakai_ppn:vatOn }).eq('id',fromSampleId);
     if(error){ err.textContent='Gagal simpan: '+error.message; reset(); return; }
-    delete orderSummary[fromSampleId]; ordersCache=null; orderView='list'; orderFinance=null; finReport=null; dashData=null; sampleDocIds=null; render();
+    delete orderSummary[fromSampleId]; ordersCache=null; orderView='list'; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; sampleDocIds=null; render();
     return;
   }
   let buyer_id=null;
@@ -1282,12 +1303,13 @@ async function saveNewOrder(){
     const r=await resolveBuyerId(nm); if(r.error){ err.textContent='Gagal simpan buyer: '+r.error; reset(); return; } buyer_id=r.id;
   } else if(bsel){ buyer_id=bsel; }
   else { err.textContent='Pilih buyer dulu.'; reset(); return; }
-  const { error }=await sb.from('orders').insert({
-    no_order:no, buyer_id, nilai_jual:nilai, nilai_sample:nilaiSample, tanggal_order:tgl, catatan:cat,
+  const serah=(document.getElementById('oSerah')||{}).value||null;
+  const { error }=await orderWrite({
+    no_order:no, buyer_id, nilai_jual:nilai, nilai_sample:nilaiSample, tanggal_order:tgl, tanggal_serah_terima:serah, catatan:cat,
     items, status, po_masuk_no:poMasuk, pic_sales:currentUserId, pakai_ppn:vatOn
   });
   if(error){ err.textContent='Gagal simpan order: '+error.message; reset(); return; }
-  ordersCache=null; orderView='list'; orderFinance=null; finReport=null; dashData=null; render();
+  ordersCache=null; orderView='list'; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render();
 }
 
 // ===== Sample + PI Sample (Langkah 6) =====
@@ -1426,40 +1448,53 @@ function bindSampleTab(){
   document.querySelectorAll('.o-row').forEach(r=>r.onclick=()=>{ openOrderId=r.dataset.open; pjOrderId=r.dataset.open; activeTab='doc_jual'; sampleFormOpen=false; poFormOpen=false; buyerPayFormOpen=false; render(); });
 }
 
-// ===== Piutang Buyer (berbasis order) =====
+// ===== Piutang Buyer (diambil dari Penjualan / buku-kas, semua bulan) =====
+let allMonthsLoaded=false;
+async function ensureAllMonths(){
+  for(const mo of state.months){ await ensureMonth(mo); }
+  allMonthsLoaded=true; render();
+}
 function viewPiutangBuyer(){
-  if(ordersCache===null){ if(!orderLoading) loadOrders(); return `<div class="o-card">Memuat…</div>`; }
-  const list=ordersCache.filter(o=>o.status!=='batal')
-    .map(o=>({...o, sisa:(Number(o.nilai_jual)||0)-(Number(o.total_bayar_buyer)||0)}))
-    .filter(o=>o.sisa>0.5);
-  const total=list.reduce((s,o)=>s+o.sisa,0);
-  const rows=list.map(o=>{
-    const bayar=Number(o.total_bayar_buyer)||0, nilai=Number(o.nilai_jual)||0;
-    const st = bayar<=0 ? '<span class="o-badge" style="background:#FBF1D8;color:#8A5B0E">Belum bayar</span>' : '<span class="o-badge" style="background:#E6EEF6;color:#1B4E7A">DP masuk</span>';
-    return `<tr class="o-row" data-open="${o.id}">
-      <td style="font-weight:600;color:var(--tea-dark)">${esc(o.no_order)}</td>
-      <td>${esc(o.buyer_name)}</td>
-      <td style="text-align:right">${rp(nilai)}</td>
-      <td style="text-align:right">${rp(bayar)}</td>
-      <td style="text-align:right;color:var(--danger);font-weight:600">${rp(o.sisa)}</td>
-      <td>${st}</td>
-    </tr>`;
-  }).join('');
+  if(!allMonthsLoaded){ ensureAllMonths(); return `<div class="o-wrap"><div class="o-card">Memuat data penjualan…</div></div>`; }
+  const rows=[]; let total=0;
+  state.buyers.forEach(b=>{
+    state.months.forEach(mo=>{
+      getOrders(mo,b.id).forEach(o=>{
+        const c=orderCalc(o);
+        if(c.sisa>0.5){
+          total+=c.sisa;
+          const lastPay=(o.payments||[]).map(p=>p.tgl).filter(Boolean).sort().pop();
+          const du=c.daysLeft;
+          const tempoTxt=c.jatuhTempo?`${fmtLong(c.jatuhTempo)}${(du!=null&&du<0)?` <span style="color:var(--danger)">(telat ${-du}h)</span>`:(du!=null&&du<=3?` <span style="color:#8A5B0E">(${du}h lagi)</span>`:'')}`:'—';
+          const st=c.status==='dp'?'<span class="o-badge" style="background:#E6EEF6;color:#1B4E7A">DP masuk</span>':'<span class="o-badge" style="background:#FBF1D8;color:#8A5B0E">Belum bayar</span>';
+          rows.push(`<tr>
+            <td style="font-weight:600;color:var(--tea-dark)">${esc(o.noInvoice||o.noPI||o.noPO||'(tanpa no)')}</td>
+            <td>${esc(b.name)}</td>
+            <td style="white-space:nowrap">${o.tglOrder?fmtLong(o.tglOrder):'—'}</td>
+            <td style="text-align:right">${rp(c.totalTagihan)}</td>
+            <td style="text-align:right">${rp(c.dibayar)}</td>
+            <td style="text-align:right;color:var(--danger);font-weight:600">${rp(c.sisa)}</td>
+            <td style="white-space:nowrap">${lastPay?fmtLong(lastPay):'<span style="color:var(--ink-soft)">belum</span>'}</td>
+            <td style="white-space:nowrap">${tempoTxt}</td>
+            <td>${st}</td>
+          </tr>`);
+        }
+      });
+    });
+  });
   return `<div class="o-wrap">
     <div class="o-head"><h2 class="o-title">Piutang Buyer</h2></div>
-    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Order yang belum lunas (sisa &gt; 0). Klik order untuk catat pembayaran. Piutang = Nilai jual − pembayaran diterima.</p>
-    <div class="o-card" style="padding:0;overflow:hidden">
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Diambil dari <b>Penjualan</b> — order yang belum lunas (semua bulan). Piutang = Total tagihan − pembayaran. Catat pembayaran di menu Penjualan.</p>
+    <div class="o-card" style="padding:0;overflow:auto">
       <table class="o-table">
-        <thead><tr><th>No order</th><th>Buyer</th><th style="text-align:right">Nilai jual</th><th style="text-align:right">Dibayar</th><th style="text-align:right">Sisa piutang</th><th>Status</th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="6" class="o-empty">Tidak ada piutang. Semua order lunas 🎉</td></tr>`}</tbody>
+        <thead><tr><th>Invoice / PO</th><th>Buyer</th><th>Tgl order</th><th style="text-align:right">Total tagihan</th><th style="text-align:right">Dibayar</th><th style="text-align:right">Sisa</th><th>Tgl bayar</th><th>Jatuh tempo</th><th>Status</th></tr></thead>
+        <tbody>${rows.join('')||`<tr><td colspan="9" class="o-empty">Tidak ada piutang. Semua lunas 🎉</td></tr>`}</tbody>
       </table>
-      ${list.length?`<div style="padding:12px 14px;text-align:right;border-top:1px solid var(--paper-line);font-size:14px">Total piutang: <b style="color:var(--danger)">${rp(total)}</b></div>`:''}
+      ${rows.length?`<div style="padding:12px 14px;text-align:right;border-top:1px solid var(--paper-line);font-size:14px">Total piutang: <b style="color:var(--danger)">${rp(total)}</b></div>`:''}
     </div>
   </div>`;
 }
-function bindPiutangBuyer(){
-  document.querySelectorAll('.o-row').forEach(r=>r.onclick=()=>{ openOrderId=r.dataset.open; orderView='card'; activeTab='daftar_order'; sampleFormOpen=false; poFormOpen=false; buyerPayFormOpen=false; render(); });
-}
+function bindPiutangBuyer(){}
 
 // ===== Pembelian (dari supplier_bills): untuk order buyer (HPP) + umum (RnB/operasional) =====
 function viewPembelianForm(){
@@ -1480,9 +1515,12 @@ function viewPembelianForm(){
       <div id="pbSupplierNewWrap" style="display:none"><label class="o-field">Nama supplier baru</label><input class="o-input" id="pbSupplierNew" placeholder="mis. Kebun Ciwidey / Toko RnB"></div>
       ${itemEditorHTML([])}
       ${vatToggleHTML(true)}
+      <label class="o-field">Ongkir (Rp, opsional)</label>
+      <input class="o-input" id="oOngkir" type="number" inputmode="numeric" placeholder="mis. 117000 (tanpa PPN)" value="">
+      <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Ongkir/kirim dari supplier. Ditambahkan ke total (tidak kena PPN).</p>
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
         <div><label class="o-field">No nota / invoice supplier</label><input class="o-input" id="pbNo" placeholder="opsional"></div>
-        <div><label class="o-field">Nilai (Rp)</label><input class="o-input" id="pbNilai" type="number" inputmode="numeric" placeholder="otomatis dari item"></div>
+        <div><label class="o-field">Nilai (Rp)</label><input class="o-input" id="pbNilai" type="number" inputmode="numeric" placeholder="otomatis dari item + ongkir"></div>
       </div>
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
         <div><label class="o-field">Tanggal</label><input class="o-input" id="pbTerima" type="date" value="${today()}"></div>
@@ -1503,9 +1541,10 @@ async function savePembelian(){
   const ssel=document.getElementById('pbSupplier').value;
   const snewEl=document.getElementById('pbSupplierNew'); const snew=snewEl?snewEl.value.trim():'';
   const no=document.getElementById('pbNo').value.trim();
-  const items=collectItems();
+  const items=itemsWithOngkir();
   const vatOn=poVatOn()!==false;
-  const nilai=items.length?(vatOn?computeItemTotals(items).total:itemsTotal(items)):(Number(document.getElementById('pbNilai').value)||0);
+  const _t=computeItemTotals(items);
+  const nilai=items.length?(vatOn?_t.total:_t.dpp+_t.ongkir):(Number(document.getElementById('pbNilai').value)||0);
   const terima=document.getElementById('pbTerima').value||today();
   const tempo=document.getElementById('pbTempo').value||null;
   const btn=document.getElementById('pbSave'); btn.disabled=true; btn.textContent='Menyimpan…';
@@ -1516,17 +1555,25 @@ async function savePembelian(){
   if(nilai<=0){ if(err) err.textContent='Nilai harus lebih dari 0 (isi item atau nilai).'; reset(); return; }
   const { error }=await sb.from('supplier_bills').insert({ no_tagihan:no, order_id, supplier_id, nilai, items, tanggal_terima:terima, jatuh_tempo:tempo, jenis, status:'belum', pakai_ppn:vatOn });
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; reset(); return; }
-  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; pembelianFormOpen=false; render();
+  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; pembelianFormOpen=false; render();
 }
 function viewPembelian(){
   if(pembelianFormOpen) return viewPembelianForm();
   if(billsCache===null){ if(!billLoading) loadBills(); return `<div class="o-card">Memuat…</div>`; }
   const bmap={}; (ordersCache||[]).forEach(o=>bmap[o.id]=o.buyer_name);
-  const forPO=billsCache.filter(b=>b.jenis==='pemenuhan_po');
-  const umum=billsCache.filter(b=>b.jenis!=='pemenuhan_po');
+  const ym = finMonth==='all'?null:finMonth;
+  const inMo=d=> !ym || String(d||'').slice(0,7)===ym;
+  const base=billsCache.filter(b=>inMo(b.tanggal_terima));
+  const buyerOf=b=>bmap[b.order_id]||'';
+  const buyerNames=[...new Set(base.filter(b=>b.jenis==='pemenuhan_po').map(buyerOf).filter(Boolean))].sort();
+  const bOpts=`<option value="all" ${pembelianBuyer==='all'?'selected':''}>Semua buyer</option>`+buyerNames.map(n=>`<option value="${escAttr(n)}" ${pembelianBuyer===n?'selected':''}>${esc(n)}</option>`).join('');
+  const buyerMatch=b=> pembelianBuyer==='all' || buyerOf(b)===pembelianBuyer;
+  const forPO=base.filter(b=>b.jenis==='pemenuhan_po' && buyerMatch(b));
+  const umum=(pembelianBuyer==='all'?base.filter(b=>b.jenis!=='pemenuhan_po'):[]);
   const totPO=forPO.reduce((s,b)=>s+(Number(b.nilai)||0),0);
   const totUmum=umum.reduce((s,b)=>s+(Number(b.nilai)||0),0);
   const itemLine=b=>b.items&&b.items.length?`<div style="font-weight:400;font-size:11px;color:var(--ink-soft)">${esc(itemSummary(b.items))}</div>`:'';
+  const actBtns=b=>`<button class="o-btn ghost" data-pbedit="${b.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-pbdel="${b.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`;
   const rowsPO=forPO.map(b=>`<tr>
     <td style="font-weight:600;color:var(--tea-dark)">${esc(b.no_tagihan||'-')}${itemLine(b)}</td>
     <td>${esc(bmap[b.order_id]||'—')}</td>
@@ -1534,29 +1581,31 @@ function viewPembelian(){
     <td>${esc(b.supplier_name||'—')}</td>
     <td style="text-align:right">${rp(b.nilai)}</td>
     <td>${billStatusBadge(b)}</td>
+    <td style="text-align:right;white-space:nowrap">${actBtns(b)}</td>
   </tr>`).join('');
   const rowsUmum=umum.map(b=>`<tr>
     <td style="font-weight:600;color:var(--tea-dark)">${esc(b.no_tagihan||'-')}${itemLine(b)}</td>
     <td>${esc(b.supplier_name||'—')}</td>
     <td style="text-align:right">${rp(b.nilai)}</td>
     <td>${billStatusBadge(b)}</td>
+    <td style="text-align:right;white-space:nowrap">${actBtns(b)}</td>
   </tr>`).join('');
   return `<div class="o-wrap">
-    <div class="o-head"><h2 class="o-title">Pembelian</h2><button class="o-btn" id="pbNew">+ Pembelian</button></div>
-    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Catatan pembelian, dikelompokkan: untuk memenuhi order buyer (masuk HPP) vs pembelian umum (RnB/operasional → biaya usaha).</p>
+    <div class="o-head"><h2 class="o-title">Pembelian</h2><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${monthSelectHTML()}<select class="o-input" onchange="setPembelianBuyer(this.value)" style="width:auto;padding:8px 10px">${bOpts}</select><button class="o-btn" id="pbNew">+ Pembelian</button></div></div>
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Periode: <b>${periodeLabel()}</b>${pembelianBuyer==='all'?'':' · Buyer: <b>'+esc(pembelianBuyer)+'</b>'}. Dikelompokkan: untuk memenuhi order buyer (masuk HPP) vs pembelian umum (RnB/operasional → biaya usaha).</p>
     <p style="margin:0 0 8px;font-weight:600;color:var(--ink)">Pembelian untuk order buyer (HPP)</p>
     <div class="o-card" style="padding:0;overflow:hidden">
       <table class="o-table">
-        <thead><tr><th>No / item</th><th>Buyer</th><th>Order</th><th>Supplier</th><th style="text-align:right">Nilai</th><th>Status</th></tr></thead>
-        <tbody>${rowsPO||`<tr><td colspan="6" class="o-empty">Belum ada pembelian untuk order.</td></tr>`}</tbody>
+        <thead><tr><th>No / item</th><th>Buyer</th><th>Order</th><th>Supplier</th><th style="text-align:right">Nilai</th><th>Status</th><th></th></tr></thead>
+        <tbody>${rowsPO||`<tr><td colspan="7" class="o-empty">Belum ada pembelian untuk order.</td></tr>`}</tbody>
       </table>
       ${forPO.length?`<div style="padding:10px 14px;text-align:right;border-top:1px solid var(--paper-line)">Total: <b>${rp(totPO)}</b></div>`:''}
     </div>
     <p style="margin:16px 0 8px;font-weight:600;color:var(--ink)">Pembelian umum (RnB / operasional)</p>
     <div class="o-card" style="padding:0;overflow:hidden">
       <table class="o-table">
-        <thead><tr><th>No / item</th><th>Supplier</th><th style="text-align:right">Nilai</th><th>Status</th></tr></thead>
-        <tbody>${rowsUmum||`<tr><td colspan="4" class="o-empty">Belum ada pembelian umum.</td></tr>`}</tbody>
+        <thead><tr><th>No / item</th><th>Supplier</th><th style="text-align:right">Nilai</th><th>Status</th><th></th></tr></thead>
+        <tbody>${rowsUmum||`<tr><td colspan="5" class="o-empty">Belum ada pembelian umum.</td></tr>`}</tbody>
       </table>
       ${umum.length?`<div style="padding:10px 14px;text-align:right;border-top:1px solid var(--paper-line)">Total: <b>${rp(totUmum)}</b></div>`:''}
     </div>
@@ -1568,6 +1617,8 @@ function bindPembelian(){
   const bs=document.getElementById('pbSupplier'); if(bs) bs.onchange=()=>{ const w=document.getElementById('pbSupplierNewWrap'); if(w) w.style.display=bs.value==='__new'?'block':'none'; };
   const sv=document.getElementById('pbSave'); if(sv) sv.onclick=savePembelian;
   const cx=document.getElementById('pbCancel'); if(cx) cx.onclick=()=>{ pembelianFormOpen=false; render(); };
+  document.querySelectorAll('[data-pbedit]').forEach(b=>b.onclick=()=>{ editBillId=b.dataset.pbedit; billView='edit'; activeTab='tagihan'; expandedNav=tabParent('tagihan'); render(); });
+  document.querySelectorAll('[data-pbdel]').forEach(b=>b.onclick=()=>deleteBill(b.dataset.pbdel));
   bindItemEditor();
 }
 
@@ -1721,7 +1772,7 @@ async function saveSetoran(){
     ? await sb.from('modal_setoran').update(payload).eq('id',editSetoranId)
     : await sb.from('modal_setoran').insert(payload);
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan setoran'; return; }
-  investorsCache=null; finReport=null; dashData=null; modalForm=null; editSetoranId=null; render();
+  investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; modalForm=null; editSetoranId=null; render();
 }
 // ---- Form: Tambah investor ----
 function viewInvestorForm(){
@@ -1760,7 +1811,7 @@ async function saveInvestor(){
     ? await sb.from('investors').update(payload).eq('id',editInvestorId)
     : await sb.from('investors').insert(payload);
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan investor'; return; }
-  investorsCache=null; finReport=null; dashData=null; modalForm=null; editInvestorId=null; render();
+  investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; modalForm=null; editInvestorId=null; render();
 }
 // ---- Form: Catat bagi hasil ----
 function viewBagiForm(){
@@ -1821,11 +1872,11 @@ async function saveBagi(){
   const btn=document.getElementById('bgSave'); btn.disabled=true; btn.textContent='Menyimpan…';
   const { error }=await sb.from('bagi_hasil').insert({ investor_id:iid, order_id:oid, order_no:oid?ono:null, dasar, tanggal:tgl, jumlah, catatan:cat });
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan bagi hasil'; return; }
-  investorsCache=null; finReport=null; dashData=null; modalForm=null; render();
+  investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; modalForm=null; render();
 }
-async function delSetoran(id){ if(!confirm('Hapus setoran modal ini?')) return; await sb.from('modal_setoran').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; render(); }
-async function delInvestor(id){ if(!confirm('Hapus investor ini? Setoran & bagi hasil yang sudah dicatat tetap tersimpan (tanpa tautan investor).')) return; await sb.from('investors').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; render(); }
-async function delBagi(id){ if(!confirm('Hapus catatan bagi hasil ini?')) return; await sb.from('bagi_hasil').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; render(); }
+async function delSetoran(id){ if(!confirm('Hapus setoran modal ini?')) return; await sb.from('modal_setoran').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render(); }
+async function delInvestor(id){ if(!confirm('Hapus investor ini? Setoran & bagi hasil yang sudah dicatat tetap tersimpan (tanpa tautan investor).')) return; await sb.from('investors').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render(); }
+async function delBagi(id){ if(!confirm('Hapus catatan bagi hasil ini?')) return; await sb.from('bagi_hasil').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render(); }
 function bindModalModule(){
   if(modalForm==='setoran'){ document.getElementById('msSave').onclick=saveSetoran; document.getElementById('msCancel').onclick=()=>{ modalForm=null; editSetoranId=null; render(); }; return; }
   if(modalForm==='investor'){ document.getElementById('ivSave').onclick=saveInvestor; document.getElementById('ivCancel').onclick=()=>{ modalForm=null; editInvestorId=null; render(); }; return; }
@@ -1883,6 +1934,7 @@ function viewAsetModule(){
       <div style="padding:10px 14px;text-align:right;border-top:1px solid var(--paper-line)">Total aset tetap: <b>${rp(totalTetap)}</b></div>
     </div>
     <button class="o-btn ghost" id="asAdd" style="margin-top:8px">+ Tambah aset</button>
+    ${(canWr && asetCache.some(x=>!x.transaction_id))?`<button class="o-btn" id="asBackfill" style="margin-top:8px;margin-left:8px">Masukkan ${asetCache.filter(x=>!x.transaction_id).length} aset ke Arus Kas</button>`:''}
 
     <p style="margin:20px 0 8px;font-weight:600;color:var(--ink)">2 · Aset Lancar</p>
     <div class="o-card">
@@ -1930,17 +1982,52 @@ async function saveAset(){
   if(!nama){ if(err) err.textContent='Isi nama aset.'; return; }
   if(nilai<=0){ if(err) err.textContent='Nilai harus lebih dari 0.'; return; }
   const btn=document.getElementById('asSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const payload={ nama, tanggal:tgl, nilai, catatan:cat };
-  const { error }= editAsetId
-    ? await sb.from('aset_tetap').update(payload).eq('id',editAsetId)
-    : await sb.from('aset_tetap').insert(payload);
+  let error;
+  if(editAsetId){
+    const existing=(asetCache||[]).find(a=>a.id===editAsetId);
+    if(existing && existing.transaction_id){ try{ await sb.from('transactions').update({ tanggal:tgl||today(), jumlah:nilai, catatan:'Aset: '+nama }).eq('id',existing.transaction_id); }catch(e){} }
+    ({ error }=await sb.from('aset_tetap').update({ nama, tanggal:tgl, nilai, catatan:cat }).eq('id',editAsetId));
+  } else {
+    // Pembelian aset = uang keluar → catat ke Arus Kas (mengurangi saldo bank)
+    let txId=null;
+    try{ const { data:tx }=await sb.from('transactions').insert({ tanggal:tgl||today(), arah:'keluar', jenis:'lain', jumlah:nilai, kategori:'Aset', catatan:'Aset: '+nama }).select('id').single(); txId=tx?tx.id:null; }catch(e){}
+    const payload={ nama, tanggal:tgl, nilai, catatan:cat, transaction_id:txId };
+    let res=await sb.from('aset_tetap').insert(payload);
+    if(res.error && /transaction_id/i.test(res.error.message||'')){ const rest={...payload}; delete rest.transaction_id; res=await sb.from('aset_tetap').insert(rest); }
+    error=res.error;
+  }
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan aset'; return; }
-  asetCache=null; finReport=null; dashData=null; asetForm=false; editAsetId=null; render();
+  asetCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null; asetForm=false; editAsetId=null; render();
 }
-async function delAset(id){ if(!confirm('Hapus aset ini?')) return; await sb.from('aset_tetap').delete().eq('id',id); asetCache=null; finReport=null; dashData=null; render(); }
+// Masukkan aset lama (yang belum punya transaksi) ke Arus Kas sebagai uang keluar, sudah terbayar.
+async function backfillAsetToKas(){
+  const list=(asetCache||[]).filter(x=>!x.transaction_id);
+  if(!list.length){ alert('Semua aset sudah masuk Arus Kas.'); return; }
+  if(!confirm(`Masukkan ${list.length} aset ke Arus Kas sebagai uang keluar (kategori "Aset", sudah terbayar)? Saldo bank akan berkurang sesuai nilai aset.`)) return;
+  const btn=document.getElementById('asBackfill'); if(btn){ btn.disabled=true; btn.textContent='Memproses…'; }
+  let ok=0, fail=0;
+  for(const a of list){
+    const { data:tx, error:te }=await sb.from('transactions').insert({ tanggal:a.tanggal||today(), arah:'keluar', jenis:'lain', jumlah:Number(a.nilai)||0, kategori:'Aset', catatan:'Aset: '+a.nama }).select('id').single();
+    if(te){ fail++; continue; }
+    const { error:ue }=await sb.from('aset_tetap').update({ transaction_id:tx.id }).eq('id',a.id);
+    if(ue){
+      if(/transaction_id/i.test(ue.message||'')){ await sb.from('transactions').delete().eq('id',tx.id);
+        alert('Jalankan dulu SQL [18] (kolom transaction_id) di Supabase, lalu klik lagi. Belum ada yang diubah.'); asetCache=null; ledgerCache=null; render(); return; }
+      fail++;
+    } else ok++;
+  }
+  asetCache=null; ledgerCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null;
+  alert(`Selesai. ${ok} aset masuk ke Arus Kas${fail?`, ${fail} gagal`:''}.`);
+  render();
+}
+async function delAset(id){ if(!confirm('Hapus aset ini? Transaksi kas keluarnya ikut terhapus.')) return;
+  const a=(asetCache||[]).find(x=>x.id===id);
+  if(a && a.transaction_id){ try{ await sb.from('transactions').delete().eq('id',a.transaction_id); }catch(e){} }
+  await sb.from('aset_tetap').delete().eq('id',id); asetCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null; render(); }
 function bindAsetModule(){
   if(asetForm){ document.getElementById('asSave').onclick=saveAset; document.getElementById('asCancel').onclick=()=>{ asetForm=false; editAsetId=null; render(); }; return; }
   const a=document.getElementById('asAdd'); if(a) a.onclick=()=>{ editAsetId=null; asetForm=true; render(); };
+  const bf=document.getElementById('asBackfill'); if(bf) bf.onclick=backfillAsetToKas;
   document.querySelectorAll('[data-editaset]').forEach(el=>el.onclick=()=>{ editAsetId=el.dataset.editaset; asetForm=true; render(); });
   document.querySelectorAll('[data-delaset]').forEach(el=>el.onclick=()=>delAset(el.dataset.delaset));
 }
@@ -2042,10 +2129,10 @@ async function savePinjaman(){
   const btn=document.getElementById('pjSave'); btn.disabled=true; btn.textContent='Menyimpan…';
   const { error }=await sb.from('pinjaman').insert({ pemberi, tanggal:tgl, jumlah, status:'belum', catatan:cat });
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan pinjaman'; return; }
-  pinjamanCache=null; finReport=null; dashData=null; pinjamanForm=false; render();
+  pinjamanCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; pinjamanForm=false; render();
 }
-async function togglePinjaman(id, cur){ const ns=cur==='lunas'?'belum':'lunas'; await sb.from('pinjaman').update({status:ns}).eq('id',id); pinjamanCache=null; finReport=null; dashData=null; render(); }
-async function delPinjaman(id){ if(!confirm('Hapus catatan pinjaman ini?')) return; await sb.from('pinjaman').delete().eq('id',id); pinjamanCache=null; finReport=null; dashData=null; render(); }
+async function togglePinjaman(id, cur){ const ns=cur==='lunas'?'belum':'lunas'; await sb.from('pinjaman').update({status:ns}).eq('id',id); pinjamanCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render(); }
+async function delPinjaman(id){ if(!confirm('Hapus catatan pinjaman ini?')) return; await sb.from('pinjaman').delete().eq('id',id); pinjamanCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render(); }
 function bindHutangModule(){
   if(pinjamanForm){ document.getElementById('pjSave').onclick=savePinjaman; document.getElementById('pjCancel').onclick=()=>{ pinjamanForm=false; render(); }; return; }
   const a=document.getElementById('htAddPinjaman'); if(a) a.onclick=()=>{ pinjamanForm=true; render(); };
@@ -2055,18 +2142,44 @@ function bindHutangModule(){
 
 // ===== Keuangan berbasis order/transactions: Arus Kas, Biaya Usaha, HPP, Penjualan =====
 const TX_JENIS_LABEL={dp:'DP buyer',pelunasan:'Pelunasan buyer',hpp:'HPP',biaya_usaha:'Biaya usaha',modal:'Setoran modal',bayar_hutang:'Bayar supplier',lain:'Lainnya'};
+// Keterangan lengkap 1 baris kas: jenis · (buyer utk uang masuk) · kategori · catatan
+function txKet(t){
+  const label=TX_JENIS_LABEL[t.jenis]||t.jenis;
+  const parts=[label];
+  if(t.arah==='masuk' && t.buyer_name) parts.push(t.buyer_name);
+  if(t.kategori && t.kategori!==label) parts.push(t.kategori);
+  if(t.catatan) parts.push(t.catatan);
+  return parts.join(' · ');
+}
 let ledgerCache=null; let kasForm=false; let hppCache=null;
+let kasEditId=null; let kasOrderFilter='all';
+function setKasOrder(v){ kasOrderFilter=v; render(); }
+// Cache bersama data berat (dipakai ulang antar tab Ringkasan/HPP/Penjualan/Laporan/Arus kas)
+let vsData=null, txData=null;
+async function getVS(){ if(vsData) return vsData; try{ const { data }=await sb.from('v_order_summary').select('id,no_order,status,nilai_jual,hpp,laba,piutang,masuk_buyer'); vsData=data||[]; }catch(e){ vsData=vsData||[]; } return vsData; }
+async function getTX(){ if(txData) return txData; try{ let { data,error }=await sb.from('transactions').select('id,tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order,buyers(nama))').order('tanggal'); if(error){ const r=await sb.from('transactions').select('id,tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order)').order('tanggal'); data=r.data; } txData=(data||[]).map(t=>({...t, buyer_name:(t.orders&&t.orders.buyers)?t.orders.buyers.nama:null})); }catch(e){ txData=txData||[]; } return txData; }
 async function loadLedger(){
   try{
-    const { data }=await sb.from('transactions').select('id,tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order)').order('tanggal');
+    const data=await getTX();
     ledgerCache=(data||[]).map(t=>({...t, order_no:t.orders?t.orders.no_order:null}));
   }catch(e){ ledgerCache=ledgerCache||[]; }
   render();
 }
 async function loadHpp(){
   try{
-    const { data }=await sb.from('v_order_summary').select('id,no_order,status,nilai_jual,hpp,laba,piutang,masuk_buyer');
-    hppCache=(data||[]).filter(o=>o.status!=='batal');
+    const [vs,ors,pos]=await Promise.all([
+      getVS(),
+      sb.from('orders').select('id,tanggal_order'),
+      sb.from('purchase_orders').select('order_id,jatuh_tempo,deadline_kirim')
+    ]);
+    const omap={}; (ors.data||[]).forEach(o=>omap[o.id]=o);
+    const pmap={}; (pos.data||[]).forEach(p=>{ if(!p.order_id) return; const e=pmap[p.order_id]||(pmap[p.order_id]={});
+      if(p.jatuh_tempo && (!e.jatuh_tempo||p.jatuh_tempo<e.jatuh_tempo)) e.jatuh_tempo=p.jatuh_tempo;
+      if(p.deadline_kirim && (!e.deadline_kirim||p.deadline_kirim<e.deadline_kirim)) e.deadline_kirim=p.deadline_kirim; });
+    hppCache=(vs||[]).filter(o=>o.status!=='batal').map(o=>({ ...o,
+      tglOrder:(omap[o.id]||{}).tanggal_order||null,
+      jatuhTempo:(pmap[o.id]||{}).jatuh_tempo||null,
+      deadlineKirim:(pmap[o.id]||{}).deadline_kirim||null }));
   }catch(e){ hppCache=hppCache||[]; }
   render();
 }
@@ -2075,31 +2188,45 @@ function viewKasModule(){
   if(ledgerCache===null){ loadLedger(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
   if(kasForm) return viewKasForm();
   const canWr=canSeeCost();
-  let saldo=0, masukT=0, keluarT=0;
-  const rows=ledgerCache.map(t=>{
+  const ym = finMonth==='all'?null:finMonth;
+  const sorted=ledgerCache.slice().sort((a,b)=>String(a.tanggal||'').localeCompare(String(b.tanggal||'')));
+  // saldo awal = semua transaksi SEBELUM bulan yang dipilih
+  let opening=0;
+  if(ym) sorted.forEach(t=>{ if(String(t.tanggal||'').slice(0,7)<ym){ opening+=(t.arah==='masuk'?1:-1)*(Number(t.jumlah)||0); } });
+  const monthTx = ym ? sorted.filter(t=>String(t.tanggal||'').slice(0,7)===ym) : sorted;
+  // saldo berjalan (bank) per transaksi — dihitung atas SEMUA transaksi bulan ini
+  let run=opening; const saldoById={};
+  monthTx.forEach(t=>{ run+=(t.arah==='masuk'?1:-1)*(Number(t.jumlah)||0); saldoById[t.id]=run; });
+  const closing=run;
+  const orderNos=[...new Set(monthTx.map(t=>t.order_no).filter(Boolean))].sort();
+  const oOpts=`<option value="all" ${kasOrderFilter==='all'?'selected':''}>Semua order</option>`+orderNos.map(n=>`<option value="${escAttr(n)}" ${kasOrderFilter===n?'selected':''}>${esc(n)}</option>`).join('');
+  const shown = kasOrderFilter==='all' ? monthTx : monthTx.filter(t=>t.order_no===kasOrderFilter);
+  let masukT=0, keluarT=0;
+  const rows=shown.map(t=>{
     const masuk=t.arah==='masuk'?(Number(t.jumlah)||0):0;
     const keluar=t.arah==='keluar'?(Number(t.jumlah)||0):0;
-    saldo+=masuk-keluar; masukT+=masuk; keluarT+=keluar;
-    const ket=(TX_JENIS_LABEL[t.jenis]||t.jenis)+(t.kategori?` · ${t.kategori}`:'')+(t.catatan?` · ${t.catatan}`:'');
-    const canDel=canWr && !t.order_id; // hanya transaksi manual (bukan dari order) yang bisa dihapus di sini
+    masukT+=masuk; keluarT+=keluar;
+    const ket=txKet(t);
+    const editable=canWr && ['biaya_usaha','modal','lain'].includes(t.jenis); // hanya transaksi manual
     return `<tr>
       <td style="white-space:nowrap">${t.tanggal?fmtLong(t.tanggal):'-'}</td>
       <td>${esc(ket)}</td>
       <td>${esc(t.order_no||'—')}</td>
       <td style="text-align:right;color:#1D6B4F">${masuk?rp(masuk):''}</td>
       <td style="text-align:right;color:var(--danger)">${keluar?rp(keluar):''}</td>
-      <td style="text-align:right;font-weight:600">${rp(saldo)}</td>
-      ${canWr?`<td style="text-align:right">${canDel?`<button class="o-btn ghost" data-delkas="${t.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:''}</td>`:''}
+      <td style="text-align:right;font-weight:600">${rp(saldoById[t.id])}</td>
+      ${canWr?`<td style="text-align:right;white-space:nowrap">${editable?`<button class="o-btn ghost" data-editkas="${t.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delkas="${t.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:''}</td>`:''}
     </tr>`;
   }).join('');
   const stat=(l,v,c)=>`<div class="o-stat"><div class="l">${l}</div><div class="v" style="${c?`color:${c}`:''}">${rp(v)}</div></div>`;
   return `<div class="o-wrap">
-    <div class="o-head"><h2 class="o-title">Arus Kas</h2>${canWr?'<button class="o-btn" id="kasNew">+ Catat transaksi</button>':''}</div>
-    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Buku kas dari seluruh transaksi order (DP/pelunasan buyer, bayar supplier, biaya usaha, modal). DP/pelunasan &amp; pembayaran supplier tercatat otomatis dari modul terkait — di sini bisa tambah transaksi manual (biaya operasional, setoran modal, dll).</p>
-    <div class="o-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px">
+    <div class="o-head"><h2 class="o-title">Arus Kas</h2><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${monthSelectHTML()}<select class="o-input" onchange="setKasOrder(this.value)" style="width:auto;padding:8px 10px">${oOpts}</select>${canWr?'<button class="o-btn ghost" id="kasDiag">🔍 Cek dobel</button><button class="o-btn" id="kasNew">+ Catat transaksi</button>':''}</div></div>
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Periode: <b>${periodeLabel()}</b>${kasOrderFilter==='all'?'':' · Order: <b>'+esc(kasOrderFilter)+'</b>'}. DP/pelunasan (dari Penjualan), bayar supplier, biaya usaha, modal. Saldo = saldo bank berjalan (semua order).</p>
+    <div class="o-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px">
+      ${ym?stat('Saldo awal bulan', opening, 'var(--ink-soft)'):''}
       ${stat('Total uang masuk', masukT, '#1D6B4F')}
       ${stat('Total uang keluar', keluarT, 'var(--danger)')}
-      ${stat('Saldo kas', saldo)}
+      ${stat(ym?'Saldo akhir bulan':'Saldo kas', closing)}
     </div>
     <div class="o-card" style="padding:0;overflow:hidden">
       <table class="o-table">
@@ -2111,27 +2238,35 @@ function viewKasModule(){
 }
 const BIAYA_KATEGORI=['Raw material','Delivery: Supplier ke Warehouse','Delivery: Warehouse ke Buyer','Gaji karyawan','RnB','Sample / Marketing','Biaya usaha lainnya'];
 function viewKasForm(){
-  const jopts=[['biaya_usaha','Biaya usaha (uang keluar)'],['modal','Setoran modal (uang masuk)'],['lain','Lainnya']].map(j=>`<option value="${j[0]}">${j[1]}</option>`).join('');
-  const kopts=BIAYA_KATEGORI.map(k=>`<option value="${escAttr(k)}">${esc(k)}</option>`).join('');
+  if(ordersCache===null && !orderLoading) loadOrders();
+  const e = kasEditId ? (ledgerCache||[]).find(t=>t.id===kasEditId) : null;
+  const eJ=e?e.jenis:'biaya_usaha', eArah=e?e.arah:'keluar', eTgl=e?e.tanggal:today(), eJum=e?Math.round(Number(e.jumlah)||0):'', eCat=e?(e.catatan||''):'', eKat=e?(e.kategori||''):'', eOrd=e?(e.order_id||''):'';
+  const knownKat=BIAYA_KATEGORI.includes(eKat);
+  const jopts=[['biaya_usaha','Biaya usaha (uang keluar)'],['modal','Setoran modal (uang masuk)'],['lain','Lainnya']].map(j=>`<option value="${j[0]}" ${eJ===j[0]?'selected':''}>${j[1]}</option>`).join('');
+  const kopts=BIAYA_KATEGORI.map(k=>`<option value="${escAttr(k)}" ${eKat===k?'selected':''}>${esc(k)}</option>`).join('');
+  const oopts=(ordersCache||[]).map(o=>`<option value="${o.id}" ${eOrd===o.id?'selected':''}>${esc(o.no_order)} · ${esc(o.buyer_name)}</option>`).join('');
   return `<div class="o-wrap" style="max-width:480px">
-    <div class="o-head"><h2 class="o-title">Catat transaksi kas</h2></div>
+    <div class="o-head"><h2 class="o-title">${e?'Edit transaksi kas':'Catat transaksi kas'}</h2></div>
     <div class="o-card">
       <label class="o-field" style="margin-top:0">Jenis</label>
       <select class="o-input" id="kxJenis">${jopts}</select>
+      <label class="o-field">Untuk order buyer (opsional)</label>
+      <select class="o-input" id="kxOrder"><option value="">— umum / tanpa buyer —</option>${oopts}</select>
+      <p style="font-size:11px;color:var(--ink-soft);margin:4px 0 0">Isi kalau biaya ini untuk pemenuhan PO buyer tertentu — nanti muncul per order/buyer di Biaya Usaha.</p>
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
-        <div><label class="o-field">Arah</label><select class="o-input" id="kxArah"><option value="keluar">Uang keluar</option><option value="masuk">Uang masuk</option></select></div>
-        <div><label class="o-field">Tanggal</label><input class="o-input" id="kxTgl" type="date" value="${today()}"></div>
+        <div><label class="o-field">Arah</label><select class="o-input" id="kxArah"><option value="keluar" ${eArah==='keluar'?'selected':''}>Uang keluar</option><option value="masuk" ${eArah==='masuk'?'selected':''}>Uang masuk</option></select></div>
+        <div><label class="o-field">Tanggal</label><input class="o-input" id="kxTgl" type="date" value="${eTgl}"></div>
       </div>
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
-        <div><label class="o-field">Kategori</label><select class="o-input" id="kxKategori">${kopts}<option value="__custom">Lainnya (isi sendiri)…</option></select></div>
-        <div><label class="o-field">Jumlah (Rp)</label><input class="o-input" id="kxJumlah" type="number" inputmode="numeric" placeholder="mis. 500000"></div>
+        <div><label class="o-field">Kategori</label><select class="o-input" id="kxKategori">${kopts}<option value="__custom" ${(e&&!knownKat&&eKat)?'selected':''}>Lainnya (isi sendiri)…</option></select></div>
+        <div><label class="o-field">Jumlah (Rp)</label><input class="o-input" id="kxJumlah" type="number" inputmode="numeric" placeholder="mis. 500000" value="${eJum}"></div>
       </div>
-      <input class="o-input" id="kxKategoriCustom" placeholder="Tulis kategori lain" style="display:none;margin-top:6px">
+      <input class="o-input" id="kxKategoriCustom" placeholder="Tulis kategori lain" style="display:${(e&&!knownKat&&eKat)?'block':'none'};margin-top:6px" value="${(e&&!knownKat)?escAttr(eKat):''}">
       <label class="o-field">Catatan</label>
-      <input class="o-input" id="kxCatatan" placeholder="opsional">
+      <input class="o-input" id="kxCatatan" placeholder="opsional" value="${escAttr(eCat)}">
       <div id="kxErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:8px"></div>
       <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="o-btn" id="kxSave">Simpan transaksi</button>
+        <button class="o-btn" id="kxSave">${e?'Simpan perubahan':'Simpan transaksi'}</button>
         <button class="o-btn ghost" id="kxCancel">Batal</button>
       </div>
     </div>
@@ -2146,51 +2281,150 @@ async function saveKas(){
   if(kategori==='__custom') kategori=(document.getElementById('kxKategoriCustom').value||'').trim();
   const jumlah=Number(document.getElementById('kxJumlah').value)||0;
   const cat=document.getElementById('kxCatatan').value.trim();
+  const order_id=(document.getElementById('kxOrder')||{}).value||null;
   if(jumlah<=0){ if(err) err.textContent='Jumlah harus lebih dari 0.'; return; }
   const btn=document.getElementById('kxSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('transactions').insert({ tanggal:tgl, arah, jenis, jumlah, kategori, catatan:cat });
+  const payload={ tanggal:tgl, arah, jenis, jumlah, kategori, catatan:cat, order_id };
+  const { error }= kasEditId
+    ? await sb.from('transactions').update(payload).eq('id',kasEditId)
+    : await sb.from('transactions').insert(payload);
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan transaksi'; return; }
-  ledgerCache=null; orderFinance=null; finReport=null; dashData=null; kasForm=false; render();
+  ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; kasForm=false; kasEditId=null; render();
 }
-async function delKas(id){ if(!confirm('Hapus transaksi kas ini?')) return; await sb.from('transactions').delete().eq('id',id); ledgerCache=null; orderFinance=null; finReport=null; dashData=null; render(); }
+async function delKas(id){ if(!confirm('Hapus transaksi kas ini?')) return; await sb.from('transactions').delete().eq('id',id); ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render(); }
+// Hapus 1 transaksi dengan aman: ikut hapus pembayaran tagihan yang menaut + segarkan status tagihan/PO.
+async function deleteTxSafe(id){
+  const { data:bp }=await sb.from('bill_payments').select('id,bill_id').eq('transaction_id',id);
+  for(const p of (bp||[])){ await sb.from('bill_payments').delete().eq('id',p.id); await refreshBillStatus(p.bill_id); }
+  const { error }=await sb.from('transactions').delete().eq('id',id);
+  return error?{error:error.message}:{};
+}
+// Panel diagnosa Arus Kas: ringkasan + daftar dugaan transaksi dobel, bisa dihapus 1-per-1.
+async function openKasDiag(){
+  let ov=document.getElementById('kasDiagOverlay'); if(ov) ov.remove();
+  const { data:tx }=await sb.from('transactions').select('id,tanggal,arah,jenis,jumlah,order_id,kategori,catatan,orders(no_order,buyers(nama))').order('tanggal');
+  const rows=(tx||[]).map(t=>({...t, buyer_name:(t.orders&&t.orders.buyers)?t.orders.buyers.nama:null, order_no:t.orders?t.orders.no_order:null}));
+  let masuk=0,keluar=0; const byJ={};
+  rows.forEach(t=>{ const j=Number(t.jumlah)||0; if(t.arah==='masuk')masuk+=j; else keluar+=j; const k=(TX_JENIS_LABEL[t.jenis]||t.jenis)+' ('+(t.arah==='masuk'?'masuk':'keluar')+')'; byJ[k]=(byJ[k]||0)+j; });
+  // dugaan dobel: kelompokkan berdasarkan arah+jenis+jumlah (tanggal & order boleh beda).
+  // Tampilkan SEMUA anggota grup yang isinya >1, supaya bisa dihapus salah satunya.
+  const groups={};
+  rows.forEach(t=>{ const k=[t.arah,t.jenis,Math.round(Number(t.jumlah)||0)].join('|'); (groups[k]||(groups[k]=[])).push(t); });
+  const dups=Object.values(groups).filter(g=>g.length>1).flat()
+    .sort((a,b)=>(Number(b.jumlah)||0)-(Number(a.jumlah)||0) || String(a.tanggal||'').localeCompare(String(b.tanggal||'')));
+  const jRows=Object.keys(byJ).sort((a,b)=>byJ[b]-byJ[a]).map(k=>`<tr><td style="padding:5px 10px">${esc(k)}</td><td style="padding:5px 10px;text-align:right;font-family:monospace">${rp(byJ[k])}</td></tr>`).join('');
+  const dRows=dups.map(t=>{
+    const legacy = t.kategori==='Penjualan' && !t.order_id; // dari tab Penjualan lama
+    return `<tr${legacy?' style="background:#FBF1D8"':''}>
+      <td style="padding:5px 8px;white-space:nowrap">${t.tanggal?fmtLong(t.tanggal):'-'}</td>
+      <td style="padding:5px 8px">${esc(txKet(t))}</td>
+      <td style="padding:5px 8px">${esc(t.order_no||'—')}</td>
+      <td style="padding:5px 8px;font-size:11px;color:${legacy?'#8A5B0E':'var(--ink-soft)'}">${legacy?'tab Penjualan lama ⟵ hapus ini':'kartu order'}</td>
+      <td style="padding:5px 8px;text-align:right;font-family:monospace">${rp(t.jumlah)}</td>
+      <td style="padding:5px 8px;text-align:right"><button class="o-btn ghost" data-diagdel="${t.id}" style="padding:3px 9px;color:var(--danger);border-color:#E3B9B3">Hapus 1</button></td>
+    </tr>`;
+  }).join('');
+  ov=document.createElement('div'); ov.id='kasDiagOverlay';
+  ov.innerHTML=`<div class="overlay" style="position:fixed;inset:0;background:rgba(20,30,25,.45);z-index:9999;display:flex;align-items:flex-start;justify-content:center;overflow:auto;padding:24px">
+    <div style="background:#fff;border-radius:12px;max-width:820px;width:100%;padding:22px 24px;box-shadow:0 20px 60px rgba(0,0,0,.3)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h2 style="margin:0;font-size:18px;color:var(--tea-dark)">Diagnosa Arus Kas</h2><button class="o-btn ghost" data-diagclose="1">Tutup</button></div>
+      <div class="o-grid" style="grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px">
+        <div class="o-stat"><div class="l">Total masuk</div><div class="v" style="color:#1D6B4F">${rp(masuk)}</div></div>
+        <div class="o-stat"><div class="l">Total keluar</div><div class="v" style="color:var(--danger)">${rp(keluar)}</div></div>
+        <div class="o-stat"><div class="l">Saldo (${rows.length} transaksi)</div><div class="v">${rp(masuk-keluar)}</div></div>
+      </div>
+      <p style="margin:0 0 6px;font-weight:600">Rincian per jenis</p>
+      <div style="border:1px solid var(--paper-line);border-radius:8px;overflow:hidden;margin-bottom:16px"><table style="width:100%;border-collapse:collapse;font-size:13px">${jRows||'<tr><td style="padding:8px">Belum ada transaksi.</td></tr>'}</table></div>
+      <p style="margin:0 0 6px;font-weight:600">Dugaan transaksi dobel: <span style="color:${dups.length?'var(--danger)':'#1D6B4F'}">${dups.length}</span></p>
+      ${dups.length?`<p style="font-size:12px;color:var(--ink-soft);margin:0 0 6px">Baris dengan <b>jenis + jumlah sama</b> dikelompokkan (tanggal boleh beda, mis. 16 vs 17 April). Yang bertanda kuning <b>"tab Penjualan lama"</b> itu salinan yang perlu dihapus — klik "Hapus 1". Yang "kartu order" biarkan (itu yang asli & terhubung ke order).</p>
+      <div style="border:1px solid var(--paper-line);border-radius:8px;overflow:hidden"><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="background:#FAF8F2"><th style="padding:6px 8px;text-align:left">Tanggal</th><th style="padding:6px 8px;text-align:left">Keterangan</th><th style="padding:6px 8px;text-align:left">Order</th><th style="padding:6px 8px;text-align:left">Sumber</th><th style="padding:6px 8px;text-align:right">Jumlah</th><th></th></tr></thead><tbody>${dRows}</tbody></table></div>`
+      :`<p style="font-size:12.5px;color:#1D6B4F;margin:0">Tidak ada transaksi yang terdeteksi dobel. 👍</p>`}
+    </div></div>`;
+  document.body.appendChild(ov);
+  ov.querySelector('[data-diagclose]').onclick=()=>ov.remove();
+  const back=ov.querySelector('.overlay'); back.onclick=(e)=>{ if(e.target===back) ov.remove(); };
+  ov.querySelectorAll('[data-diagdel]').forEach(b=>b.onclick=async()=>{
+    if(!confirm('Hapus 1 salinan transaksi ini? Tidak bisa dibatalkan.')) return;
+    b.disabled=true; b.textContent='Menghapus…';
+    const r=await deleteTxSafe(b.dataset.diagdel);
+    if(r&&r.error){ alert('Gagal hapus: '+r.error+'\n(Pastikan Anda login sebagai owner/keuangan.)'); b.disabled=false; b.textContent='Hapus 1'; return; }
+    ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; billsCache=null; ordersCache=null;
+    ov.remove(); render(); openKasDiag();
+  });
+}
 function bindKasModule(){
-  if(kasForm){ document.getElementById('kxSave').onclick=saveKas; document.getElementById('kxCancel').onclick=()=>{ kasForm=false; render(); };
+  if(kasForm){ document.getElementById('kxSave').onclick=saveKas; document.getElementById('kxCancel').onclick=()=>{ kasForm=false; kasEditId=null; render(); };
     const kk=document.getElementById('kxKategori'); if(kk) kk.onchange=()=>{ const cu=document.getElementById('kxKategoriCustom'); if(cu) cu.style.display=kk.value==='__custom'?'block':'none'; };
     return; }
-  const n=document.getElementById('kasNew'); if(n) n.onclick=()=>{ kasForm=true; render(); };
+  const n=document.getElementById('kasNew'); if(n) n.onclick=()=>{ kasEditId=null; kasForm=true; render(); };
+  const dg=document.getElementById('kasDiag'); if(dg) dg.onclick=openKasDiag;
+  document.querySelectorAll('[data-editkas]').forEach(el=>el.onclick=()=>{ kasEditId=el.dataset.editkas; kasForm=true; render(); });
   document.querySelectorAll('[data-delkas]').forEach(el=>el.onclick=()=>delKas(el.dataset.delkas));
 }
 // ---- Biaya Usaha (dari transactions jenis=biaya_usaha) ----
 function viewBiayaModule(){
+  if(billsCache===null){ if(!billLoading) loadBills(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
+  if(ordersCache===null){ if(!orderLoading) loadOrders(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
   if(ledgerCache===null){ loadLedger(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
-  const biaya=ledgerCache.filter(t=>t.jenis==='biaya_usaha');
-  const byCat={}; biaya.forEach(t=>{ const k=t.kategori||'(tanpa kategori)'; byCat[k]=(byCat[k]||0)+(Number(t.jumlah)||0); });
-  const total=biaya.reduce((s,t)=>s+(Number(t.jumlah)||0),0);
-  const catRows=Object.keys(byCat).sort((a,b)=>byCat[b]-byCat[a]).map(k=>`<tr><td>${esc(k)}</td><td style="text-align:right">${rp(byCat[k])}</td></tr>`).join('');
-  const entryRows=biaya.slice().reverse().map(t=>`<tr>
-    <td style="white-space:nowrap">${t.tanggal?fmtLong(t.tanggal):'-'}</td>
-    <td>${esc(t.kategori||'—')}</td>
-    <td>${esc(t.order_no||'—')}</td>
-    <td style="color:var(--ink-soft);font-size:12px">${esc(t.catatan||'')}</td>
-    <td style="text-align:right">${rp(t.jumlah)}</td>
+  const num=n=>(Number(n)||0).toLocaleString('id-ID');
+  const ym = finMonth==='all'?null:finMonth;
+  const inMo=d=> !ym || String(d||'').slice(0,7)===ym;
+  const omapOrd={}; (ordersCache||[]).forEach(o=>omapOrd[o.id]={no:o.no_order,buyer:o.buyer_name});
+  const rawBills0=billsCache.filter(b=>b.jenis==='pemenuhan_po' && inMo(b.tanggal_terima));
+  const opTx0=ledgerCache.filter(t=>t.jenis==='biaya_usaha' && inMo(t.tanggal));
+  const orderIds=[...new Set([...rawBills0.map(b=>b.order_id), ...opTx0.map(t=>t.order_id)].filter(Boolean))];
+  const bOpts=`<option value="all" ${biayaOrder==='all'?'selected':''}>Semua order</option>`+orderIds.map(id=>{ const m=omapOrd[id]||{}; const lbl=(m.no||'?')+(m.buyer?(' · '+m.buyer):''); return `<option value="${id}" ${biayaOrder===id?'selected':''}>${esc(lbl)}</option>`; }).join('');
+  const rawMatch=b=> biayaOrder==='all' || b.order_id===biayaOrder;
+  const orderLbl = biayaOrder==='all' ? '' : ((omapOrd[biayaOrder]||{}).no||'')+((omapOrd[biayaOrder]||{}).buyer?(' · '+(omapOrd[biayaOrder]||{}).buyer):'');
+  // ── RAW MATERIAL: dari Tagihan supplier pemenuhan PO, per item (qty × unit price, ex-PPN) ──
+  const rmap={};
+  rawBills0.filter(rawMatch).forEach(b=>{
+    if(b.items&&b.items.length){ b.items.forEach(it=>{ const nm=it.nama||'(tanpa nama)'; const key=nm+'|'+(it.satuan||'')+'|'+(Number(it.harga)||0);
+      const g=rmap[key]||(rmap[key]={nama:nm,satuan:it.satuan||'',harga:Number(it.harga)||0,qty:0,total:0});
+      g.qty+=Number(it.qty)||0; g.total+=(Number(it.qty)||0)*(Number(it.harga)||0); }); }
+    else { rmap['b'+b.id]={nama:(b.supplier_name||b.no_tagihan||'Pembelian'),satuan:'',harga:0,qty:0,total:Number(b.nilai)||0}; }
+  });
+  const raw=Object.values(rmap); const totalRaw=raw.reduce((s,r)=>s+r.total,0);
+  // ── OPERASIONAL: transaksi Arus Kas berjenis biaya usaha (gaji, ongkir, RnB, dll). Bisa ditandai buyer. ──
+  const omap={};
+  opTx0.filter(t=> biayaOrder==='all' || t.order_id===biayaOrder).forEach(t=>{ const k=t.kategori||'(tanpa kategori)'; omap[k]=(omap[k]||0)+(Number(t.jumlah)||0); });
+  const oper=Object.keys(omap).sort((a,b)=>omap[b]-omap[a]).map(k=>({desc:k,total:omap[k]}));
+  const totalOper=oper.reduce((s,r)=>s+r.total,0);
+  const totalBiaya=totalRaw+totalOper;
+  const BAND='background:#E7B4A8;color:#5c241b;font-weight:700', FOOT='background:#F6EAE6;font-weight:700';
+  const rawRows=raw.map((r,i)=>`<tr>
+    <td style="text-align:center;color:var(--ink-soft)">${i+1}</td>
+    <td>${esc(r.nama)}</td>
+    <td style="text-align:right;white-space:nowrap">${r.qty?num(r.qty):''} ${esc(r.satuan||'')}</td>
+    <td style="text-align:right">${r.harga?num(r.harga):'—'}</td>
+    <td style="text-align:right;font-family:monospace">${num(r.total)}</td>
+  </tr>`).join('');
+  const operRows=oper.map((r,i)=>`<tr>
+    <td style="text-align:center;color:var(--ink-soft)">${i+1}</td>
+    <td>${esc(r.desc)}</td>
+    <td style="text-align:right;font-family:monospace">${num(r.total)}</td>
   </tr>`).join('');
   return `<div class="o-wrap">
-    <div class="o-head"><h2 class="o-title">Biaya Usaha</h2></div>
-    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Otomatis dari transaksi berjenis biaya usaha (termasuk sample gratis / marketing dan biaya operasional yang dicatat di Arus Kas).</p>
-    <p style="margin:0 0 8px;font-weight:600;color:var(--ink)">Per kategori</p>
-    <div class="o-card" style="padding:0;overflow:hidden">
+    <div class="o-head"><h2 class="o-title">Biaya Usaha</h2><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${monthSelectHTML()}<select class="o-input" onchange="setBiayaOrder(this.value)" style="width:auto;padding:8px 10px">${bOpts}</select></div></div>
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 14px">Periode: <b>${periodeLabel()}</b>${biayaOrder==='all'?'':' · Order: <b>'+esc(orderLbl)+'</b>'}. Rekap pengeluaran: <b>Raw material</b> (pemenuhan PO) + <b>Operasional</b> (Arus Kas biaya usaha, yang ditandai order). Untuk laba, raw material dihitung sebagai <b>HPP</b> (bukan dobel).</p>
+    <div class="o-card" style="padding:0;overflow:hidden;margin-bottom:16px">
+      <div style="${BAND};padding:10px 14px;letter-spacing:.03em">RAW MATERIAL PURCHASE</div>
       <table class="o-table">
-        <thead><tr><th>Kategori</th><th style="text-align:right">Total</th></tr></thead>
-        <tbody>${catRows||`<tr><td colspan="2" class="o-empty">Belum ada biaya usaha.</td></tr>`}</tbody>
+        <thead><tr><th style="width:40px">No</th><th>Description</th><th style="text-align:right">Qty</th><th style="text-align:right">Unit Price</th><th style="text-align:right">Total Amount</th></tr></thead>
+        <tbody>${rawRows||`<tr><td colspan="5" class="o-empty">Belum ada pembelian raw material. Buat PO keluar / Tagihan supplier (pemenuhan PO).</td></tr>`}</tbody>
+        <tfoot><tr style="${FOOT}"><td colspan="4" style="padding:11px 14px">Total Raw Material</td><td style="text-align:right;padding:11px 14px;font-family:monospace">${num(totalRaw)}</td></tr></tfoot>
       </table>
-      <div style="padding:10px 14px;text-align:right;border-top:1px solid var(--paper-line)">Total biaya usaha: <b>${rp(total)}</b></div>
     </div>
-    <p style="margin:20px 0 8px;font-weight:600;color:var(--ink)">Rincian</p>
-    <div class="o-card" style="padding:0;overflow:hidden">
+    <div class="o-card" style="padding:0;overflow:hidden;margin-bottom:16px">
+      <div style="${BAND};padding:10px 14px;letter-spacing:.03em">OPERASIONAL</div>
       <table class="o-table">
-        <thead><tr><th>Tanggal</th><th>Kategori</th><th>Order</th><th>Catatan</th><th style="text-align:right">Jumlah</th></tr></thead>
-        <tbody>${entryRows||`<tr><td colspan="5" class="o-empty">Belum ada rincian.</td></tr>`}</tbody>
+        <thead><tr><th style="width:40px">No</th><th>Description</th><th style="text-align:right">Nominal (Rp)</th></tr></thead>
+        <tbody>${operRows||`<tr><td colspan="3" class="o-empty">Belum ada biaya operasional. Catat lewat Pembelian (jenis operasional) atau Arus Kas — otomatis nge-link ke sini.</td></tr>`}</tbody>
+        <tfoot><tr style="${FOOT}"><td colspan="2" style="padding:11px 14px">Total Operasional</td><td style="text-align:right;padding:11px 14px;font-family:monospace">${num(totalOper)}</td></tr></tfoot>
       </table>
+    </div>
+    <div class="o-card" style="${BAND};display:flex;justify-content:space-between;align-items:center;padding:14px 16px">
+      <span style="font-size:15px">TOTAL BIAYA USAHA</span><span style="font-family:monospace;font-size:16px">Rp ${num(totalBiaya)}</span>
     </div>
   </div>`;
 }
@@ -2213,7 +2447,7 @@ function viewHppModule(){
   const stat=(l,v,c)=>`<div class="o-stat"><div class="l">${l}</div><div class="v" style="${c?`color:${c}`:''}">${rp(v)}</div></div>`;
   return `<div class="o-wrap">
     <div class="o-head"><h2 class="o-title">HPP &amp; Laba</h2></div>
-    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Laba kotor per order = Nilai jual − HPP (pembelian pemenuhan PO). Pembagian laba ke investor dikelola di menu Modal.</p>
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Laba kotor per order = Nilai jual − HPP (pembelian teh ke supplier untuk memenuhi PO). Pembagian laba ke investor dikelola di menu Modal.</p>
     <div class="o-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px">
       ${stat('Total nilai jual', nj)}
       ${stat('Total HPP', hpp, 'var(--danger)')}
@@ -2237,6 +2471,9 @@ function viewPenjualanReport(){
     return `<tr>
       <td style="font-weight:600;color:var(--tea-dark)">${esc(o.no_order)}</td>
       <td>${esc(o.status||'')}</td>
+      <td style="white-space:nowrap">${o.tglOrder?fmtLong(o.tglOrder):'—'}</td>
+      <td style="white-space:nowrap">${o.jatuhTempo?fmtLong(o.jatuhTempo):'—'}</td>
+      <td style="white-space:nowrap">${o.deadlineKirim?fmtLong(o.deadlineKirim):'—'}</td>
       <td style="text-align:right">${rp(o.nilai_jual)}</td>
       <td style="text-align:right;color:#1D6B4F">${rp(m)}</td>
       <td style="text-align:right;color:${p>0?'var(--danger)':'var(--ink-soft)'}">${rp(p)}</td>
@@ -2245,7 +2482,7 @@ function viewPenjualanReport(){
   const stat=(l,v,c)=>`<div class="o-stat"><div class="l">${l}</div><div class="v" style="${c?`color:${c}`:''}">${rp(v)}</div></div>`;
   return `<div class="o-wrap">
     <div class="o-head"><h2 class="o-title">Penjualan</h2></div>
-    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Register penjualan berbasis order. Terbitkan/cetak PI &amp; Invoice dari menu Order History; catat pembayaran buyer di kartu order.</p>
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Register penjualan berbasis order. Tanggal order, jatuh tempo bayar &amp; deadline pengiriman ditarik otomatis dari order &amp; PO terkait. Terbitkan/cetak PI &amp; Invoice dari menu Order History; catat pembayaran buyer di kartu order.</p>
     <div class="o-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px">
       ${stat('Total penjualan', nj)}
       ${stat('Sudah dibayar', masuk, '#1D6B4F')}
@@ -2253,8 +2490,8 @@ function viewPenjualanReport(){
     </div>
     <div class="o-card" style="padding:0;overflow:hidden">
       <table class="o-table">
-        <thead><tr><th>Order</th><th>Status</th><th style="text-align:right">Nilai jual</th><th style="text-align:right">Dibayar</th><th style="text-align:right">Piutang</th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="5" class="o-empty">Belum ada penjualan.</td></tr>`}</tbody>
+        <thead><tr><th>Order</th><th>Status</th><th>Tgl order</th><th>Jatuh tempo</th><th>Deadline kirim</th><th style="text-align:right">Nilai jual</th><th style="text-align:right">Dibayar</th><th style="text-align:right">Piutang</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="8" class="o-empty">Belum ada penjualan.</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
@@ -2262,13 +2499,13 @@ function viewPenjualanReport(){
 
 // ===== Laporan Keuangan (order-based) + Cetak PDF (Laba Rugi, Neraca, Arus Kas, Buku Kas) =====
 let dashData=null;
-let finReport=null; dashData=null;
+let finReport=null; dashData=null; hppCache=null; vsData=null; txData=null;
 let finMonth='all'; // 'all' | 'YYYY-MM'
 async function loadFinReport(){
   const sel=async(tbl,cols)=>{ try{ const { data }=await sb.from(tbl).select(cols); return data||[]; }catch(e){ return []; } };
   const [vs,tx,at,pj,bills,bpays,ms,bh,ords]=await Promise.all([
-    sel('v_order_summary','id,nilai_jual,hpp,piutang,status,masuk_buyer,no_order'),
-    sel('transactions','tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order)'),
+    getVS(),
+    getTX(),
     sel('aset_tetap','nilai,tanggal'),
     sel('pinjaman','jumlah,status,tanggal'),
     sel('supplier_bills','id,nilai,tanggal_terima'),
@@ -2289,10 +2526,10 @@ async function loadFinReport(){
   const labaKotor=penjualanNetto-hpp;
   const piutang=nb.reduce((s,o)=>s+n(o.piutang),0);
   const txF=tx.filter(t=>m(t.tanggal));
-  let kasMasuk=0,kasKeluar=0,biaya=0;
-  txF.forEach(t=>{ const j=n(t.jumlah); if(t.arah==='masuk')kasMasuk+=j; else if(t.arah==='keluar')kasKeluar+=j; if(t.jenis==='biaya_usaha')biaya+=j; });
+  let kasMasuk=0,kasKeluar=0,biaya=0,lainMasuk=0;
+  txF.forEach(t=>{ const j=n(t.jumlah); if(t.arah==='masuk')kasMasuk+=j; else if(t.arah==='keluar')kasKeluar+=j; if(t.jenis==='biaya_usaha')biaya+=j; if(t.arah==='masuk'&&t.jenis==='lain')lainMasuk+=j; });
   const saldoKas=kasMasuk-kasKeluar;
-  const labaBersih=labaKotor-biaya;
+  const labaBersih=labaKotor-biaya+lainMasuk;
   const asetTetap=at.filter(x=>m(x.tanggal)).reduce((s,x)=>s+n(x.nilai),0);
   const totalAset=saldoKas+piutang+asetTetap;
   const pinjamanBelum=pj.filter(p=>p.status!=='lunas'&&m(p.tanggal)).reduce((s,x)=>s+n(x.jumlah),0);
@@ -2305,10 +2542,10 @@ async function loadFinReport(){
   const totalModal=setoranModal+labaDitahan;
   const selisih=totalAset-(totalHutang+totalModal);
   const ledger=txF.map(t=>({...t, order_no:t.orders?t.orders.no_order:null})).sort((a,b)=>String(a.tanggal||'').localeCompare(String(b.tanggal||'')));
-  finReport={penjualanGross,ppn,penjualanNetto,hpp,labaKotor,biaya,labaBersih,piutang,saldoKas,kasMasuk,kasKeluar,asetTetap,totalAset,pinjamanBelum,supplierSisa,totalHutang,setoranModal,bagiHasil,labaDitahan,totalModal,selisih,ledger,periode:ym};
+  finReport={penjualanGross,ppn,penjualanNetto,hpp,labaKotor,biaya,lainMasuk,labaBersih,piutang,saldoKas,kasMasuk,kasKeluar,asetTetap,totalAset,pinjamanBelum,supplierSisa,totalHutang,setoranModal,bagiHasil,labaDitahan,totalModal,selisih,ledger,periode:ym};
   render();
 }
-function resetFinReport(){ finReport=null; dashData=null; }
+function resetFinReport(){ finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; }
 function viewLaporan(){
   if(finReport===null){ loadFinReport(); return `<div class="o-wrap"><div class="o-card">Memuat laporan…</div></div>`; }
   const f=finReport;
@@ -2322,21 +2559,39 @@ function viewLaporan(){
         <button class="o-btn" id="finPrint">Cetak Laporan (PDF)</button>
       </div></div>
     <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 14px">Periode: <b>${periodeLbl}</b>. Rincian <b>Laba Rugi, Neraca, Arus Kas &amp; Buku Kas</b> ada di <b>Cetak Laporan (PDF)</b>. PPN 11% dipisahkan dari penjualan (dititip disetor ke negara).</p>
-    <div class="o-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:6px">
+    <div class="o-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px">
       ${stat('Penjualan (inc PPN)', f.penjualanGross)}
       ${stat('PPN 11%', f.ppn, 'var(--ink-soft)')}
+      ${stat('Penjualan bersih (DPP)', f.penjualanNetto)}
+      ${stat('HPP', f.hpp, 'var(--danger)')}
       ${stat('Laba bersih usaha', f.labaBersih, f.labaBersih>=0?'#1D6B4F':'var(--danger)')}
-      ${stat('Saldo Kas & Bank', f.saldoKas)}
-      ${stat('Piutang', f.piutang, 'var(--danger)')}
-      ${stat('Hutang', f.totalHutang, 'var(--danger)')}
-      ${stat('Modal', f.totalModal)}
-      ${stat('Total Aset', f.totalAset)}
+    </div>
+    <div class="o-grid" style="grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px">
+      <div class="o-card">
+        <p style="margin:0 0 8px;font-weight:700;color:var(--tea-dark)">Aset (harta perusahaan)</p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <tr><td style="padding:5px 0">Saldo Kas &amp; Bank</td><td style="text-align:right;font-family:monospace">${rp(f.saldoKas)}</td></tr>
+          <tr><td style="padding:5px 0">Piutang (belum dibayar buyer)</td><td style="text-align:right;font-family:monospace">${rp(f.piutang)}</td></tr>
+          <tr><td style="padding:5px 0">Aset tetap</td><td style="text-align:right;font-family:monospace">${rp(f.asetTetap)}</td></tr>
+          <tr style="border-top:1.5px solid var(--tea-dark)"><td style="padding:7px 0;font-weight:700">Total Aset</td><td style="text-align:right;font-family:monospace;font-weight:700">${rp(f.totalAset)}</td></tr>
+        </table>
+        <p style="font-size:11px;color:var(--ink-soft);margin:8px 0 0">Total Aset = jumlah ketiganya. Kas, piutang, &amp; aset tetap adalah 3 jenis harta yang berbeda — bukan dihitung ganda.</p>
+      </div>
+      <div class="o-card">
+        <p style="margin:0 0 8px;font-weight:700;color:var(--tea-dark)">Kewajiban &amp; Modal</p>
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <tr><td style="padding:5px 0">Hutang (pinjaman + tagihan supplier)</td><td style="text-align:right;font-family:monospace">${rp(f.totalHutang)}</td></tr>
+          <tr><td style="padding:5px 0">Modal (setoran + laba ditahan)</td><td style="text-align:right;font-family:monospace">${rp(f.totalModal)}</td></tr>
+          <tr style="border-top:1.5px solid var(--tea-dark)"><td style="padding:7px 0;font-weight:700">Total Kewajiban + Modal</td><td style="text-align:right;font-family:monospace;font-weight:700">${rp(f.totalHutang+f.totalModal)}</td></tr>
+        </table>
+        <p style="font-size:11px;color:var(--ink-soft);margin:8px 0 0">Idealnya <b>Total Aset = Total Kewajiban + Modal</b> (neraca seimbang).</p>
+      </div>
     </div>
   </div>`;
 }
 function bindLaporan(){
   const b=document.getElementById('finPrint'); if(b) b.onclick=openFinReportPrint;
-  const ms=document.getElementById('finMonthSel'); if(ms) ms.onchange=()=>{ finMonth=ms.value; finReport=null; render(); };
+  const ms=document.getElementById('finMonthSel'); if(ms) ms.onchange=()=>{ setFinMonth(ms.value); };
 }
 function openFinReportPrint(){
   if(!finReport) return; const f=finReport; const s=state.seller||{};
@@ -2364,9 +2619,10 @@ function openFinReportPrint(){
     fr('Total penjualan (termasuk PPN)',f.penjualanGross)+
     fr('PPN 11% (dititip, disetor ke negara)',f.ppn,{indent:true,neg:true,mut:true})+
     fr('Penjualan bersih (DPP)',f.penjualanNetto,{strong:true})+
-    fr('HPP (pembelian pemenuhan PO)',f.hpp,{indent:true,neg:true})+
+    fr('HPP (pemenuhan PO)',f.hpp,{indent:true,neg:true})+
     fr('Laba kotor',f.labaKotor,{strong:true})+
     fr('Biaya usaha',f.biaya,{indent:true,neg:true})+
+    (f.lainMasuk?fr('Pendapatan sample/lain',f.lainMasuk,{indent:true}):'')+
     fr('Laba bersih usaha',f.labaBersih,{strong:true})+
     fr('Bagi hasil investor',f.bagiHasil,{indent:true,neg:true})+
     fr('Laba ditahan (bagian owner)',f.labaDitahan,{grand:true})
@@ -2411,7 +2667,7 @@ function openFinReportPrint(){
     const masuk=t.arah==='masuk'?(Number(t.jumlah)||0):0;
     const keluar=t.arah==='keluar'?(Number(t.jumlah)||0):0;
     saldo+=masuk-keluar;
-    const ket=(TX_JENIS_LABEL[t.jenis]||t.jenis)+(t.kategori?' · '+t.kategori:'')+(t.catatan?' · '+t.catatan:'');
+    const ket=txKet(t);
     const zeb=i%2?`background:${ZEB};${PCA}`:'';
     const td='padding:6px 10px;border-bottom:1px solid #EFEBDE;';
     const tdr=td+"text-align:right;font-family:'IBM Plex Mono',monospace;";
@@ -2582,7 +2838,10 @@ async function saveEditPO(){
   const btn=document.getElementById('poSaveEdit'); btn.disabled=true; btn.textContent='Menyimpan…';
   const { error }=await sb.from('purchase_orders').update({ no_po:no, order_id, supplier_id, tanggal:tgl, total, items, jatuh_tempo:tempo, deadline_kirim:deadline, bayar_status:bayarStatus, pakai_ppn:vatOn }).eq('id',editPOId);
   if(error){ err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan perubahan'; return; }
-  orderSummary={}; poCache=null; poView='list'; editPOId=null; render();
+  // Sinkronkan tagihan supplier terhubung dengan perubahan PO.
+  const billId=await syncBillFromPO({ id:editPOId, order_id, supplier_id, no_po:no, total, items, jatuh_tempo:tempo, tanggal:tgl, pakai_ppn:vatOn });
+  if(billId && bayarStatus==='lunas') await settleBillFull(billId);
+  orderSummary={}; poCache=null; billsCache=null; ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; poView='list'; editPOId=null; render();
 }
 function viewPOList(){
   const rows=poCache.map(p=>`<tr>
@@ -2633,6 +2892,54 @@ function poSection(o){
     ${form}
   </div>`;
 }
+// ── Auto-link PO keluar ↔ Tagihan supplier (hutang). 1 PO = 1 tagihan pemenuhan_po (dicocokkan lewat po_id). ──
+async function syncBillFromPO(po){
+  try{
+    const base={ po_id:po.id, order_id:po.order_id||null, supplier_id:po.supplier_id||null,
+      no_tagihan:po.no_po||null, nilai:Number(po.total)||0, items:po.items||[],
+      jatuh_tempo:po.jatuh_tempo||null, jenis:'pemenuhan_po', pakai_ppn:po.pakai_ppn!==false };
+    const { data:ex }=await sb.from('supplier_bills').select('id').eq('po_id',po.id).maybeSingle();
+    if(ex){ await sb.from('supplier_bills').update(base).eq('id',ex.id); return ex.id; }
+    const { data:nb }=await sb.from('supplier_bills').insert({ ...base, tanggal_terima:po.tanggal||today(), status:'belum' }).select('id').maybeSingle();
+    return nb?nb.id:null;
+  }catch(e){ console.error('syncBillFromPO gagal', e); return null; }
+}
+// Catat pembayaran tagihan supplier → Arus Kas (kas keluar) + bill_payments.
+async function recordSupplierPayment(bill, jumlah, tgl){
+  const operasional = bill.jenis==='operasional';
+  const sup = bill.supplier_name || (bill.suppliers&&bill.suppliers.nama) || '';
+  const its = (bill.items&&bill.items.length)? itemSummary(bill.items) : '';
+  const catatan = [sup, bill.no_tagihan?('tagihan '+bill.no_tagihan):'', its].filter(Boolean).join(' · ');
+  const { data:tx, error:te }=await sb.from('transactions').insert({ tanggal:tgl, arah:'keluar',
+    jenis: operasional?'biaya_usaha':'bayar_hutang', jumlah, order_id:bill.order_id||null,
+    kategori: operasional?'Pembelian operasional':'Raw material', catatan:catatan||('Tagihan '+(bill.no_tagihan||'')) }).select('id').maybeSingle();
+  if(te) return { error:te.message };
+  const { error:pe }=await sb.from('bill_payments').insert({ bill_id:bill.id, tanggal:tgl, jumlah, transaction_id:tx?tx.id:null });
+  if(pe) return { error:pe.message };
+  return {};
+}
+// Hitung ulang status tagihan dari total pembayaran, lalu samakan status PO terkait.
+async function refreshBillStatus(billId){
+  const { data:b }=await sb.from('supplier_bills').select('id,nilai,po_id').eq('id',billId).maybeSingle();
+  if(!b) return;
+  const { data:ps }=await sb.from('bill_payments').select('jumlah').eq('bill_id',billId);
+  const paid=(ps||[]).reduce((s,p)=>s+(Number(p.jumlah)||0),0);
+  const status=paid>=(Number(b.nilai)||0)-0.5?'lunas':(paid>0?'sebagian':'belum');
+  await sb.from('supplier_bills').update({status}).eq('id',billId);
+  if(b.po_id) await sb.from('purchase_orders').update({bayar_status:status}).eq('id',b.po_id);
+}
+// Lunasi sisa tagihan (dipakai saat PO ditandai Lunas).
+async function settleBillFull(billId, tgl){
+  let { data:b, error }=await sb.from('supplier_bills').select('id,nilai,jenis,order_id,no_tagihan,po_id,items,suppliers(nama)').eq('id',billId).maybeSingle();
+  if(error){ const r=await sb.from('supplier_bills').select('id,nilai,jenis,order_id,no_tagihan,po_id').eq('id',billId).maybeSingle(); b=r.data; }
+  if(!b) return;
+  if(b.suppliers) b.supplier_name=b.suppliers.nama;
+  const { data:ps }=await sb.from('bill_payments').select('jumlah').eq('bill_id',billId);
+  const paid=(ps||[]).reduce((s,p)=>s+(Number(p.jumlah)||0),0);
+  const sisa=(Number(b.nilai)||0)-paid;
+  if(sisa>0.5){ const r=await recordSupplierPayment(b, sisa, tgl||today()); if(r.error){ alert('Gagal catat pembayaran supplier: '+r.error); return; } }
+  await refreshBillStatus(billId);
+}
 async function savePO(){
   const err=document.getElementById('poErr'); err.textContent='';
   const orderSel=document.getElementById('poOrder');
@@ -2658,17 +2965,30 @@ async function savePO(){
     const r=await resolveSupplierId(snew); if(r.error){ err.textContent='Gagal simpan supplier: '+r.error; reset(); return; } supplier_id=r.id;
   } else if(ssel){ supplier_id=ssel; }
   else { err.textContent='Pilih supplier.'; reset(); return; }
-  const { error }=await sb.from('purchase_orders').insert({ no_po:no, order_id, supplier_id, tanggal:tgl, total, items, jatuh_tempo:tempo, deadline_kirim:deadline, bayar_status:bayarStatus, pakai_ppn:vatOn });
+  const { data:newPO, error }=await sb.from('purchase_orders').insert({ no_po:no, order_id, supplier_id, tanggal:tgl, total, items, jatuh_tempo:tempo, deadline_kirim:deadline, bayar_status:bayarStatus, pakai_ppn:vatOn }).select('id').maybeSingle();
   if(error){ err.textContent='Gagal simpan PO: '+error.message; reset(); return; }
-  poCache=null;
+  // Link PO keluar → tagihan supplier (hutang). Bila ditandai Lunas, catat pembayaran ke Arus Kas.
+  if(newPO){
+    const billId=await syncBillFromPO({ id:newPO.id, order_id, supplier_id, no_po:no, total, items, jatuh_tempo:tempo, tanggal:tgl, pakai_ppn:vatOn });
+    if(billId && bayarStatus==='lunas') await settleBillFull(billId);
+  }
+  poCache=null; billsCache=null; ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; orderSummary={};
   if(orderSel) poView='list'; else poFormOpen=false;
   render();
 }
 async function deletePO(id){
-  if(!confirm('Hapus PO keluar ini?')) return;
+  if(!confirm('Hapus PO keluar ini? Tagihan supplier terhubung & pembayarannya ikut terhapus.')) return;
+  // Hapus tagihan terhubung + transaksi kas dari pembayarannya agar tidak menyisakan data yatim.
+  const { data:bills }=await sb.from('supplier_bills').select('id').eq('po_id',id);
+  for(const b of (bills||[])){
+    const { data:ps }=await sb.from('bill_payments').select('transaction_id').eq('bill_id',b.id);
+    const txids=(ps||[]).map(p=>p.transaction_id).filter(Boolean);
+    if(txids.length) await sb.from('transactions').delete().in('id',txids);
+    await sb.from('supplier_bills').delete().eq('id',b.id);
+  }
   const { error }=await sb.from('purchase_orders').delete().eq('id',id);
-  if(error){ alert('Gagal hapus: '+error.message+'\n(PO yang sudah punya tagihan tidak bisa dihapus.)'); return; }
-  poCache=null; render();
+  if(error){ alert('Gagal hapus: '+error.message); return; }
+  poCache=null; billsCache=null; ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; orderSummary={}; render();
 }
 function bindPOCommon(inCard){
   const bs=document.getElementById('poSupplier');
@@ -2681,9 +3001,17 @@ function bindPOCommon(inCard){
   document.querySelectorAll('[data-delpo]').forEach(b=>b.onclick=()=>deletePO(b.dataset.delpo));
   document.querySelectorAll('[data-printpo]').forEach(b=>b.onclick=()=>openPOPrint(b.dataset.printpo));
   document.querySelectorAll('[data-postatus]').forEach(sel=>sel.onchange=async()=>{
-    const { error }=await sb.from('purchase_orders').update({bayar_status:sel.value}).eq('id',sel.dataset.postatus);
-    if(error){ alert('Gagal ubah status: '+error.message); return; }
-    const p=(poCache||[]).find(x=>x.id===sel.dataset.postatus); if(p) p.bayar_status=sel.value;
+    const poId=sel.dataset.postatus, val=sel.value;
+    const p=(poCache||[]).find(x=>x.id===poId);
+    if(val==='lunas'){
+      if(!confirm('Tandai PO ini LUNAS? Sisa tagihan supplier dicatat sebagai kas keluar di Arus Kas.')){ sel.value=(p&&p.bayar_status)||'belum'; return; }
+      const billId=await syncBillFromPO({ id:poId, order_id:p?p.order_id:null, supplier_id:p?p.supplier_id:null, no_po:p?p.no_po:null, total:p?p.total:0, items:p?p.items:[], jatuh_tempo:p?p.jatuh_tempo:null, tanggal:p?p.tanggal:null, pakai_ppn:p?p.pakai_ppn:true });
+      if(billId) await settleBillFull(billId);
+    } else {
+      const { error }=await sb.from('purchase_orders').update({bayar_status:val}).eq('id',poId);
+      if(error){ alert('Gagal ubah status: '+error.message); return; }
+    }
+    poCache=null; billsCache=null; ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; orderSummary={}; render();
   });
   bindItemEditor();
 }
@@ -2863,6 +3191,26 @@ async function loadBills(){
   let { data, error:bErr }=await sb.from('supplier_bills').select('id,no_tagihan,po_id,order_id,supplier_id,nilai,tanggal_terima,jatuh_tempo,jenis,status,items,pakai_ppn,suppliers(nama),orders(no_order)').order('created_at',{ascending:false});
   if(bErr){ const r=await sb.from('supplier_bills').select('id,no_tagihan,po_id,order_id,supplier_id,nilai,tanggal_terima,jatuh_tempo,jenis,status,suppliers(nama),orders(no_order)').order('created_at',{ascending:false}); data=r.data; }
   billsCache=(data||[]).map(b=>({...b, supplier_name:b.suppliers?b.suppliers.nama:'—', order_no:b.orders?b.orders.no_order:'—'}));
+  // Backfill sekali: PO keluar lama yang belum punya tagihan → buatkan hutang (tidak menyentuh data lain).
+  if(!poBillBackfilled){
+    poBillBackfilled=true;
+    try{
+      const { data:allPOs }=await sb.from('purchase_orders').select('id,order_id,supplier_id,no_po,total,items,jatuh_tempo,tanggal,pakai_ppn');
+      const have=new Set(billsCache.filter(b=>b.po_id).map(b=>b.po_id));
+      const missing=(allPOs||[]).filter(p=>!have.has(p.id));
+      if(missing.length){
+        // Hanya buat tagihan (hutang) — TIDAK mencatat pembayaran otomatis, supaya tidak dobel dengan
+        // pembayaran yang mungkin sudah Anda catat manual. Bayar tagihan lewat menu Pembayaran.
+        for(const p of missing){
+          await syncBillFromPO({ id:p.id, order_id:p.order_id, supplier_id:p.supplier_id, no_po:p.no_po, total:p.total, items:p.items, jatuh_tempo:p.jatuh_tempo, tanggal:p.tanggal, pakai_ppn:p.pakai_ppn });
+        }
+        let { data:d2 }=await sb.from('supplier_bills').select('id,no_tagihan,po_id,order_id,supplier_id,nilai,tanggal_terima,jatuh_tempo,jenis,status,items,pakai_ppn,suppliers(nama),orders(no_order)').order('created_at',{ascending:false});
+        if(d2) billsCache=d2.map(b=>({...b, supplier_name:b.suppliers?b.suppliers.nama:'—', order_no:b.orders?b.orders.no_order:'—'}));
+        // Tagihan/pembayaran baru dibuat → segarkan cache laporan & arus kas.
+        vsData=null; txData=null; hppCache=null; dashData=null; finReport=null; orderFinance=null; ledgerCache=null;
+      }
+    }catch(e){ console.error('backfill PO→tagihan gagal', e); }
+  }
   const { data:pays }=await sb.from('bill_payments').select('bill_id,jumlah');
   const paid={}; (pays||[]).forEach(p=>{ paid[p.bill_id]=(paid[p.bill_id]||0)+(Number(p.jumlah)||0); });
   billsCache.forEach(b=>{ b.paid=paid[b.id]||0; b.sisa=(Number(b.nilai)||0)-b.paid; });
@@ -2875,13 +3223,18 @@ function viewTagihanModule(){
   if(billView==='edit' && editBillId) return viewTagihanEdit();
   return viewTagihanList();
 }
+function jenisLabel(j){ return j==='operasional'?'<span class="o-badge" style="background:#EFEAF7;color:#5B3E9B">Operasional</span>':'<span class="o-badge" style="background:#E6EFE9;color:#1D6B4F">Raw material</span>'; }
 function viewTagihanList(){
-  const total=billsCache.reduce((s,b)=>s+(Number(b.sisa)||0),0);
+  const belum=billsCache.filter(b=>(Number(b.sisa)||0)>0.5);
+  const total=belum.reduce((s,b)=>s+(Number(b.sisa)||0),0);
+  const totalRaw=belum.filter(b=>b.jenis!=='operasional').reduce((s,b)=>s+(Number(b.sisa)||0),0);
+  const totalOp=belum.filter(b=>b.jenis==='operasional').reduce((s,b)=>s+(Number(b.sisa)||0),0);
   const rows=billsCache.map(b=>{
     const du=daysUntil(b.jatuh_tempo);
     const tempo=b.jatuh_tempo?`${fmtLong(b.jatuh_tempo)}${(du!=null&&du<0&&b.sisa>0)?` <span style="color:var(--danger)">(telat ${-du}h)</span>`:''}`:'-';
     return `<tr>
       <td style="font-weight:600;color:var(--tea-dark)">${esc(b.no_tagihan||'-')}</td>
+      <td>${jenisLabel(b.jenis)}</td>
       <td>${esc(b.order_no)}</td>
       <td>${esc(b.supplier_name)}</td>
       <td style="text-align:right">${rp(b.nilai)}</td>
@@ -2893,13 +3246,16 @@ function viewTagihanList(){
   }).join('');
   return `<div class="o-wrap">
     <div class="o-head"><h2 class="o-title">Tagihan supplier (hutang)</h2><button class="o-btn" id="billNew">+ Tagihan</button></div>
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Semua biaya yang keluar (raw material &amp; operasional) untuk tahu mana yang <b>sudah / belum dibayar</b>. Buat tagihan lewat menu <b>Pembelian</b>; bayar di menu <b>Pembayaran</b> (otomatis masuk Arus Kas).</p>
     <div class="o-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px">
-      <div class="o-stat"><div class="l">Total hutang berjalan</div><div class="v">${rp(total)}</div></div>
+      <div class="o-stat"><div class="l">Total belum dibayar</div><div class="v">${rp(total)}</div></div>
+      <div class="o-stat"><div class="l">— Raw material</div><div class="v" style="font-size:16px">${rp(totalRaw)}</div></div>
+      <div class="o-stat"><div class="l">— Operasional</div><div class="v" style="font-size:16px">${rp(totalOp)}</div></div>
     </div>
-    <div class="o-card" style="padding:0;overflow:hidden">
+    <div class="o-card" style="padding:0;overflow:auto">
       <table class="o-table">
-        <thead><tr><th>No tagihan</th><th>Order</th><th>Supplier</th><th style="text-align:right">Nilai</th><th style="text-align:right">Sisa</th><th>Jatuh tempo</th><th>Status</th><th></th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="8" class="o-empty">Belum ada tagihan supplier.</td></tr>`}</tbody>
+        <thead><tr><th>No tagihan</th><th>Jenis</th><th>Order</th><th>Supplier</th><th style="text-align:right">Nilai</th><th style="text-align:right">Sisa</th><th>Jatuh tempo</th><th>Status</th><th></th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="9" class="o-empty">Belum ada tagihan.</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
@@ -2955,13 +3311,13 @@ async function saveBill(){
   else if(ssel){ supplier_id=ssel; } else { err.textContent='Pilih supplier.'; reset(); return; }
   const { error }=await sb.from('supplier_bills').insert({ no_tagihan:no, order_id, supplier_id, nilai, items, tanggal_terima:terima, jatuh_tempo:tempo, jenis, status:'belum', pakai_ppn:vatOn });
   if(error){ err.textContent='Gagal simpan tagihan: '+error.message; reset(); return; }
-  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; billView='list'; render();
+  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; billView='list'; render();
 }
 async function deleteBill(id){
   if(!confirm('Hapus tagihan ini? Pembayaran yang tercatat ikut terhapus.')) return;
   const { error }=await sb.from('supplier_bills').delete().eq('id',id);
   if(error){ alert('Gagal hapus: '+error.message); return; }
-  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; render();
+  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render();
 }
 function bindTagihan(){
   const nb=document.getElementById('billNew'); if(nb) nb.onclick=()=>{ billView='new'; render(); };
@@ -2975,7 +3331,8 @@ function bindTagihan(){
 }
 function viewPembayaranModule(){
   if(billsCache===null){ if(!billLoading) loadBills(); return `<div class="o-card">Memuat…</div>`; }
-  const rows=billsCache.map(b=>{
+  const sortedBills=billsCache.slice().sort((a,b)=>String(b.order_no||'').localeCompare(String(a.order_no||''))); // urut order, 001 di bawah
+  const rows=sortedBills.map(b=>{
     const sisa=Number(b.sisa)||0;
     const paying=payingBillId===b.id;
     const payForm=paying?`<tr><td colspan="7" style="background:#FBF8EF">
@@ -3023,14 +3380,10 @@ async function savePayment(){
   const tgl=document.getElementById('payTgl').value||today();
   if(jumlah<=0){ if(err) err.textContent='Jumlah harus lebih dari 0.'; return; }
   const btn=document.getElementById('paySave'); btn.disabled=true; btn.textContent='Memproses…';
-  const { data:tx, error:te }=await sb.from('transactions').insert({ tanggal:tgl, arah:'keluar', jenis:'bayar_hutang', jumlah, order_id:b.order_id, kategori:'Bayar supplier', catatan:'Tagihan '+(b.no_tagihan||'') }).select('id').single();
-  if(te){ if(err) err.textContent='Gagal catat kas: '+te.message; btn.disabled=false; btn.textContent='Bayar'; return; }
-  const { error:pe }=await sb.from('bill_payments').insert({ bill_id:b.id, tanggal:tgl, jumlah, transaction_id:tx.id });
-  if(pe){ if(err) err.textContent='Gagal simpan pembayaran: '+pe.message; btn.disabled=false; btn.textContent='Bayar'; return; }
-  const paidNew=(Number(b.paid)||0)+jumlah;
-  const status=paidNew>=(Number(b.nilai)||0)?'lunas':(paidNew>0?'sebagian':'belum');
-  await sb.from('supplier_bills').update({status}).eq('id',b.id);
-  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; payingBillId=null; render();
+  const r=await recordSupplierPayment(b, jumlah, tgl);
+  if(r.error){ if(err) err.textContent='Gagal: '+r.error; btn.disabled=false; btn.textContent='Bayar'; return; }
+  await refreshBillStatus(b.id);
+  orderSummary={}; billsCache=null; ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; payingBillId=null; render();
 }
 function billsSection(o){
   if(!canSeeCost()) return '';
@@ -3060,19 +3413,26 @@ function paymentsSection(o){
       <td>${bpLabel(p)}</td>
       <td>${fmtLong(p.tanggal)}</td>
       <td style="text-align:right">${rp(p.jumlah)}</td>
-      <td style="text-align:right"><button class="o-btn ghost" data-delpay="${p.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>
+      <td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-editpay="${p.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delpay="${p.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>
     </tr>`).join('');
   const nilai=Number(o.nilai_jual)||0;
-  const form = buyerPayFormOpen ? `<div style="border-top:1px solid var(--paper-line);margin-top:12px;padding-top:12px">
+  const editP = editBuyerPayId ? pays.find(x=>x.id===editBuyerPayId) : null;
+  const fOpen = buyerPayFormOpen || !!editP;
+  const eJenis = editP ? (editP.jenis==='lain'?'sample':editP.jenis) : 'dp';
+  const eJumlah = editP ? Math.round(Number(editP.jumlah)||0) : Math.round(nilai*0.5);
+  const eTgl = editP ? (editP.tanggal||today()) : today();
+  const jopt=(v,l)=>`<option value="${v}" ${eJenis===v?'selected':''}>${l}</option>`;
+  const form = fOpen ? `<div style="border-top:1px solid var(--paper-line);margin-top:12px;padding-top:12px">
+      ${editP?'<p style="font-size:11px;color:#8A5B0E;margin:0 0 8px">✎ Mengedit pembayaran</p>':''}
       <div class="o-grid" style="grid-template-columns:1.1fr 66px 1.2fr 1.1fr;margin-bottom:0">
-        <div><label class="o-field" style="margin-top:0">Jenis</label><select class="o-input" id="bpJenis"><option value="dp">DP (order)</option><option value="pelunasan">Pelunasan (order)</option><option value="sample">Sample</option></select></div>
-        <div><label class="o-field" style="margin-top:0">Persen</label><input class="o-input" id="bpPct" type="number" value="50" data-nilai="${nilai}" data-sisa="${Math.max(0,Math.round(sisa))}"></div>
-        <div><label class="o-field" style="margin-top:0">Jumlah (Rp)</label><input class="o-input" id="bpJumlah" type="number" value="${Math.round(nilai*0.5)}"></div>
-        <div><label class="o-field" style="margin-top:0">Tanggal</label><input class="o-input" id="bpTgl" type="date" value="${today()}"></div>
+        <div><label class="o-field" style="margin-top:0">Jenis</label><select class="o-input" id="bpJenis">${jopt('dp','DP (order)')}${jopt('pelunasan','Pelunasan (order)')}${jopt('sample','Sample')}</select></div>
+        <div><label class="o-field" style="margin-top:0">Persen</label><input class="o-input" id="bpPct" type="number" value="${nilai?Math.round(eJumlah/nilai*100):50}" data-nilai="${nilai}" data-sisa="${Math.max(0,Math.round(sisa))}"></div>
+        <div><label class="o-field" style="margin-top:0">Jumlah (Rp)</label><input class="o-input" id="bpJumlah" type="number" value="${eJumlah}"></div>
+        <div><label class="o-field" style="margin-top:0">Tanggal</label><input class="o-input" id="bpTgl" type="date" value="${eTgl}"></div>
       </div>
-      <p style="font-size:11px;color:var(--ink-soft);margin:6px 0 0" id="bpNote">= 50% dari nilai order ${rp(nilai)}</p>
+      <p style="font-size:11px;color:var(--ink-soft);margin:6px 0 0" id="bpNote">Isi jumlah &amp; tanggal pembayaran.</p>
       <div id="bpErr" style="color:var(--danger);font-size:12px;min-height:14px;margin-top:6px"></div>
-      <div style="display:flex;gap:8px;margin-top:4px"><button class="o-btn" id="bpSave">Simpan pembayaran</button><button class="o-btn ghost" id="bpCancel">Batal</button></div>
+      <div style="display:flex;gap:8px;margin-top:4px"><button class="o-btn" id="bpSave">${editP?'Simpan perubahan':'Simpan pembayaran'}</button><button class="o-btn ghost" id="bpCancel">Batal</button></div>
     </div>` : `<button class="o-btn ghost" id="bpAdd" style="margin-top:6px">+ Catat pembayaran buyer</button>`;
   return `<div class="o-card">
     <p style="margin:0 0 8px;font-weight:600;color:var(--ink)">Pembayaran buyer (DP &amp; pelunasan)</p>
@@ -3090,15 +3450,17 @@ async function saveBuyerPayment(){
   const tgl=document.getElementById('bpTgl').value||today();
   if(jumlah<=0){ if(err) err.textContent='Jumlah harus lebih dari 0.'; return; }
   const btn=document.getElementById('bpSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('transactions').insert({ tanggal:tgl, arah:'masuk', jenis, jumlah, order_id:openOrderId, kategori });
+  const { error }= editBuyerPayId
+    ? await sb.from('transactions').update({ tanggal:tgl, jenis, jumlah, kategori }).eq('id',editBuyerPayId)
+    : await sb.from('transactions').insert({ tanggal:tgl, arah:'masuk', jenis, jumlah, order_id:openOrderId, kategori });
   if(error){ if(err) err.textContent='Gagal: '+error.message; btn.disabled=false; btn.textContent='Simpan pembayaran'; return; }
-  buyerPayFormOpen=false; delete orderPayments[openOrderId]; delete orderSummary[openOrderId]; ordersCache=null; render();
+  buyerPayFormOpen=false; editBuyerPayId=null; delete orderPayments[openOrderId]; piutangMeta=null; delete orderSummary[openOrderId]; ordersCache=null; ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render();
 }
 async function deleteBuyerPayment(id){
   if(!confirm('Hapus pembayaran ini?')) return;
   const { error }=await sb.from('transactions').delete().eq('id',id);
   if(error){ alert('Gagal hapus: '+error.message); return; }
-  delete orderPayments[openOrderId]; delete orderSummary[openOrderId]; ordersCache=null; orderFinance=null; finReport=null; dashData=null; render();
+  delete orderPayments[openOrderId]; piutangMeta=null; delete orderSummary[openOrderId]; ordersCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render();
 }
 function bindBuyerPayForm(){
   const bpp=document.getElementById('bpPct'); if(!bpp) return;
@@ -3162,7 +3524,7 @@ async function saveEditBill(){
   const btn=document.getElementById('billSaveEdit'); btn.disabled=true; btn.textContent='Menyimpan…';
   const { error }=await sb.from('supplier_bills').update({ no_tagihan:no, order_id, supplier_id, nilai, items, tanggal_terima:terima, jatuh_tempo:tempo, jenis, pakai_ppn:vatOn }).eq('id',editBillId);
   if(error){ err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan perubahan'; return; }
-  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; billView='list'; editBillId=null; render();
+  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; billView='list'; editBillId=null; render();
 }
 
 // ===== Pengiriman (buku kirim): jenis teh + supplier per item + resi =====
@@ -3595,29 +3957,37 @@ async function loadDashboard(){
   const [os,bs,vs,tx]=await Promise.all([
     sel('orders','id,no_order,nilai_jual,total_bayar_buyer,status,tanggal_order,buyer_id'),
     sel('buyers','id,nama'),
-    sel('v_order_summary','id,hpp,laba'),
-    sel('transactions','tanggal,arah,jenis,jumlah')
+    getVS(),
+    getTX()
   ]);
   const bmap={}; bs.forEach(b=>bmap[b.id]=b.nama);
   const hppById={},labaById={}; vs.forEach(v=>{ hppById[v.id]=Number(v.hpp)||0; labaById[v.id]=Number(v.laba)||0; });
   const nb=os.filter(o=>o.status!=='batal');
-  let penjualan=0,piutang=0,hpp=0,laba=0;
-  const perBuyer={}, perMonth={};
-  nb.forEach(o=>{
+  const ym = finMonth==='all'?null:finMonth;
+  const inMo=d=> !ym || String(d||'').slice(0,7)===ym;   // filter periode aktif
+  // Grafik tren — SELALU semua bulan (biar tetap kelihatan naik-turunnya)
+  const perMonth={};
+  nb.forEach(o=>{ const m=(o.tanggal_order||'').slice(0,7); if(m)(perMonth[m]||(perMonth[m]={penjualan:0,biaya:0})).penjualan+=Number(o.nilai_jual)||0; });
+  tx.forEach(t=>{ if(t.jenis==='biaya_usaha'){ const m=(t.tanggal||'').slice(0,7); if(m)(perMonth[m]||(perMonth[m]={penjualan:0,biaya:0})).biaya+=Number(t.jumlah)||0; } });
+  // KPI + per-buyer — difilter sesuai bulan yang dipilih
+  let penjualan=0,piutang=0,hpp=0,laba=0,jumlahOrder=0;
+  const perBuyer={};
+  nb.filter(o=>inMo(o.tanggal_order)).forEach(o=>{
+    jumlahOrder++;
     const nj=Number(o.nilai_jual)||0, by=Number(o.total_bayar_buyer)||0, pi=Math.max(0,nj-by), h=hppById[o.id]||0;
     penjualan+=nj; piutang+=pi; hpp+=h; laba+=(labaById[o.id]||0);
     const bn=bmap[o.buyer_id]||'—';
     const pb=perBuyer[bn]||(perBuyer[bn]={penjualan:0,dibayar:0,piutang:0,hpp:0});
     pb.penjualan+=nj; pb.dibayar+=by; pb.piutang+=pi; pb.hpp+=h;
-    const ym=(o.tanggal_order||'').slice(0,7); if(ym)(perMonth[ym]||(perMonth[ym]={penjualan:0,biaya:0})).penjualan+=nj;
   });
-  let masuk=0,keluar=0,biaya=0;
-  tx.forEach(t=>{ const j=Number(t.jumlah)||0, ym=(t.tanggal||'').slice(0,7);
+  let masuk=0,keluar=0,biaya=0,lainMasuk=0;
+  tx.filter(t=>inMo(t.tanggal)).forEach(t=>{ const j=Number(t.jumlah)||0;
     if(t.arah==='masuk')masuk+=j; else if(t.arah==='keluar')keluar+=j;
-    if(t.jenis==='biaya_usaha'){ biaya+=j; if(ym)(perMonth[ym]||(perMonth[ym]={penjualan:0,biaya:0})).biaya+=j; }
+    if(t.jenis==='biaya_usaha') biaya+=j;
+    if(t.arah==='masuk' && t.jenis==='lain') lainMasuk+=j;   // pendapatan sample/lain
   });
   const ppn=Math.round(penjualan*11/111);
-  dashData={penjualan,piutang,hpp,laba,biaya,saldoKas:masuk-keluar,ppn,labaBersih:(penjualan-ppn)-hpp-biaya,jumlahOrder:nb.length,perBuyer,perMonth};
+  dashData={penjualan,piutang,hpp,laba,biaya,lainMasuk,saldoKas:masuk-keluar,ppn,labaBersih:(penjualan-ppn)-hpp-biaya+lainMasuk,jumlahOrder,perBuyer,perMonth,periode:ym};
   render();
 }
 function ymLabel(ym){ const m=parseInt(ym.slice(5,7),10); return (EN_MONTHS[m-1]||ym).slice(0,3); }
@@ -3660,10 +4030,17 @@ function dashBarSVG(perBuyer){
     bars+=`<text x="${(x+bw/2).toFixed(1)}" y="${H-16}" text-anchor="middle" class="cx">${esc(nm)}</text>`; });
   return `<svg viewBox="0 0 ${W} ${H}" class="chart-svg" preserveAspectRatio="xMidYMid meet" style="font-family:'Inter',sans-serif"><style>.cx{font-size:10px;fill:#94A29A}</style>${grid}${bars}${ylab}</svg>`;
 }
+// Pilih periode (dipakai bersama oleh Ringkasan, Biaya Usaha & Laporan)
+function setFinMonth(v){ finMonth=v; dashData=null; finReport=null; render(); }
+function monthSelectHTML(){
+  const opts=`<option value="all" ${finMonth==='all'?'selected':''}>Semua bulan</option>`+ID_MONTHS_2026.map((m,i)=>{ const val='2026-'+String(i+1).padStart(2,'0'); return `<option value="${val}" ${finMonth===val?'selected':''}>${m}</option>`; }).join('');
+  return `<select class="o-input" onchange="setFinMonth(this.value)" style="width:auto;padding:8px 10px">${opts}</select>`;
+}
+function periodeLabel(){ return finMonth==='all'?'Semua bulan':(ID_MONTHS_2026[parseInt(finMonth.slice(5,7),10)-1]||finMonth); }
 function viewRingkasan(){
   if(dashData===null){ loadDashboard(); return `<div class="o-wrap"><div class="o-card">Memuat dashboard…</div></div>`; }
   const d=dashData;
-  const kpi=(l,v,cls,icon,neg)=>`<div class="kpi"><div class="kpi-top"><span class="kpi-l">${l}</span><span class="kpi-ic ${cls}">${ic(icon,18)}</span></div><div class="kpi-v ${neg&&v<0?'neg':''}" title="${rp(v)}">${rpKpi(v)}</div></div>`;
+  const kpi=(l,v,cls,icon,neg,plain,pct)=>{ const disp=pct?((Number(v)||0)+'%'):(plain?(Number(v)||0).toLocaleString('id-ID'):rpKpi(v)); const tit=pct?((Number(v)||0)+'%'):(plain?(Number(v)||0).toLocaleString('id-ID'):rp(v)); return `<div class="kpi"><div class="kpi-top"><span class="kpi-l">${l}</span><span class="kpi-ic ${cls}">${ic(icon,16)}</span></div><div class="kpi-v ${neg&&v<0?'neg':''}" title="${tit}">${disp}</div></div>`; };
   const rows=Object.keys(d.perBuyer).sort((a,b)=>d.perBuyer[b].penjualan-d.perBuyer[a].penjualan).map(nm=>{
     const b=d.perBuyer[nm];
     const status=b.piutang>0.5?`<span class="pill belum">Piutang</span>`:`<span class="pill lunas">Lunas</span>`;
@@ -3671,13 +4048,19 @@ function viewRingkasan(){
   }).join('');
   const nBuyer=Object.keys(d.perBuyer).length;
   return `
-  <div class="sec-row"><div><h2 class="sec" style="margin:0;">Ringkasan Perusahaan</h2><p class="note" style="margin:3px 0 0;">Indikator kinerja dari seluruh order &amp; transaksi tercatat</p></div></div>
+  <div class="sec-row" style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap"><div><h2 class="sec" style="margin:0;">Ringkasan Perusahaan</h2><p class="note" style="margin:3px 0 0;">Periode: <b>${periodeLabel()}</b> · KPI mengikuti bulan yang dipilih (grafik tren tetap semua bulan)</p></div>${monthSelectHTML()}</div>
   <div class="kpi-grid">
-    ${kpi('Total Penjualan', d.penjualan, 'g', 'trending-up')}
-    ${kpi('Laba Bersih Usaha', d.labaBersih, 'teal', 'chart-line', true)}
+    ${kpi('Omzet', d.penjualan+(d.lainMasuk||0), 'g', 'trending-up')}
+    ${kpi('PPN 11%', d.ppn, 'gold', 'receipt')}
+    ${kpi('Penjualan bersih (DPP)', d.penjualan-d.ppn, 'g', 'trending-up')}
+    ${kpi('HPP', d.hpp, 'red', 'flask')}
+    ${kpi('Laba kotor', (d.penjualan-d.ppn)-d.hpp, 'teal', 'chart-bar', true)}
+    ${kpi('Pendapatan sample', d.lainMasuk||0, 'g', 'flask')}
+    ${kpi('Profit', d.labaBersih, 'teal', 'chart-line', true)}
+    ${kpi('Margin rata-rata', ((d.penjualan-d.ppn)>0?Math.round(((d.penjualan-d.ppn-d.hpp)/(d.penjualan-d.ppn))*100):0), 'teal', 'chart-line', false, false, true)}
     ${kpi('Piutang', d.piutang, 'red', 'coin')}
     ${kpi('Saldo Kas & Bank', d.saldoKas, 'blue', 'wallet', true)}
-    ${kpi('Total Order', d.jumlahOrder, 'gold', 'clipboard')}
+    ${kpi('Total Order', d.jumlahOrder, 'gold', 'clipboard', false, true)}
   </div>
   <div class="panel-grid">
     <div class="panel">
@@ -3697,20 +4080,11 @@ function viewRingkasan(){
       ${rows||'<tr><td colspan="6" class="empty">Belum ada order</td></tr>'}
     </table>
   </div>
-  <div class="sec-row"><h2 class="sec" style="font-size:16px;margin:0;">Laba rugi ringkas</h2></div>
-  <div class="card">
-    <table>
-      <tr><td class="txt">Penjualan (termasuk PPN)</td><td class="num">${rp(d.penjualan)}</td></tr>
-      <tr><td class="txt">− PPN 11%</td><td class="num">${rp(d.ppn)}</td></tr>
-      <tr><td class="txt">− HPP</td><td class="num">${rp(d.hpp)}</td></tr>
-      <tr><td class="txt">− Biaya usaha</td><td class="num">${rp(d.biaya)}</td></tr>
-      <tr class="total"><td>Laba bersih usaha</td><td class="num ${d.labaBersih>=0?'':'neg'}">${rp(d.labaBersih)}</td></tr>
-    </table>
-  </div>`;
+  `;
 }
 
 async function loadOrderFinance(){
-  const { data:tx }=await sb.from('transactions').select('arah,jenis,jumlah');
+  const tx=await getTX();
   let masuk=0, bayarSupplier=0, biaya=0, modal=0;
   (tx||[]).forEach(t=>{ const j=Number(t.jumlah)||0;
     if(t.arah==='masuk' && (t.jenis==='dp'||t.jenis==='pelunasan')) masuk+=j;
@@ -4127,7 +4501,7 @@ async function saveSampleGratisCost(){
   const btn=document.getElementById('sgSave'); btn.disabled=true; btn.textContent='Menyimpan…';
   const { error }=await sb.from('transactions').insert({ tanggal:today(), arah:'keluar', jenis:'biaya_usaha', jumlah, order_id:oid, kategori:'Sample gratis / marketing', catatan:note||null });
   if(error){ if(err) err.textContent='Gagal: '+error.message; btn.disabled=false; btn.textContent='Catat sebagai Biaya usaha (marketing)'; return; }
-  delete orderSummary[oid]; orderFinance=null; finReport=null; dashData=null;
+  delete orderSummary[oid]; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null;
   document.getElementById('sgCost').value=''; document.getElementById('sgNote').value='';
   btn.disabled=false; btn.textContent='Catat sebagai Biaya usaha (marketing)';
   if(err){ err.style.color='#1D6B4F'; err.textContent='Tersimpan sebagai Biaya usaha ✓'; }
@@ -4202,9 +4576,10 @@ function bindDocPayHandlers(){
   document.querySelectorAll('[data-editdoc]').forEach(b=>b.onclick=()=>{ editDocId=b.dataset.editdoc; sampleFormOpen=true; render(); });
   document.querySelectorAll('[data-deldoc]').forEach(b=>b.onclick=()=>deleteDoc(b.dataset.deldoc));
   document.querySelectorAll('[data-printdoc]').forEach(b=>b.onclick=()=>openDocPrint(b.dataset.printdoc));
-  const bpa=document.getElementById('bpAdd'); if(bpa) bpa.onclick=()=>{ buyerPayFormOpen=true; render(); };
-  const bpc=document.getElementById('bpCancel'); if(bpc) bpc.onclick=()=>{ buyerPayFormOpen=false; render(); };
+  const bpa=document.getElementById('bpAdd'); if(bpa) bpa.onclick=()=>{ buyerPayFormOpen=true; editBuyerPayId=null; render(); };
+  const bpc=document.getElementById('bpCancel'); if(bpc) bpc.onclick=()=>{ buyerPayFormOpen=false; editBuyerPayId=null; render(); };
   const bps=document.getElementById('bpSave'); if(bps) bps.onclick=saveBuyerPayment;
+  document.querySelectorAll('[data-editpay]').forEach(b=>b.onclick=()=>{ editBuyerPayId=b.dataset.editpay; buyerPayFormOpen=false; render(); });
   document.querySelectorAll('[data-delpay]').forEach(b=>b.onclick=()=>deleteBuyerPayment(b.dataset.delpay));
   bindBuyerPayForm();
   bindItemEditor();
@@ -4220,7 +4595,10 @@ function viewPenjualan(){
   }).join('');
   return `
   <h2 class="sec">Penjualan — ${mo}</h2>
-  <p class="note">Tiap order: 1 No. Invoice, No. PI sebagai rujukan DP, 2 Faktur Pajak (DP &amp; pelunasan), plus daftar pembayaran DP/pelunasan yang otomatis masuk ke Arus kas.</p>
+  <div class="card" style="background:#FBF1D8;border:1px solid #E8C97A;color:#8A5B0E;padding:11px 14px;margin-bottom:12px;font-size:12.5px">
+    ⚠️ <b>Tab ini versi lama (buku kas per bulan).</b> Pembayaran yang dicatat di sini <b>tidak lagi masuk ke Arus Kas &amp; Laporan</b> — untuk mencegah dobel. Catat DP/pelunasan buyer di <b>kartu order (menu Daftar Order)</b> agar terhubung ke Arus Kas, HPP &amp; Piutang.
+  </div>
+  <p class="note">Tiap order: 1 No. Invoice, No. PI sebagai rujukan DP, 2 Faktur Pajak (DP &amp; pelunasan). Untuk pencatatan resmi, gunakan Daftar Order.</p>
   ${blocks}
   <div class="card"><table><tr class="total"><td>Total penjualan — semua buyer</td><td class="num">${rp(totalPenjualanAll(mo))}</td></tr></table></div>`;
 }
@@ -4579,7 +4957,13 @@ function bindEvents(){
       if(isOngkir(it)){ ord.ongkir=(Number(ord.ongkir)||0)+(Number(it.harga)||0); return; }
       ord.items.push({id:uid(), desc:it.nama||'', pack:it.packaging||it.pack||'', qty:Number(it.qty)||0, unit:it.satuan||'KG', harga:Number(it.harga)||0, ppn:11});
     });
+    ord.linkedOrderId=src.id;                                             // KUNCI: tautkan ke order relational (untuk HPP/piutang/arus kas per order)
+    ord.linkedOrderNo=src.no_order;
     if(!ord.noPO && (src.po_masuk_no||src.no_order)) ord.noPO=src.po_masuk_no||src.no_order;
+    if(src.tanggal_order) ord.tglOrder=src.tanggal_order;                 // link tgl order
+    if(src.tanggal_serah_terima){ ord.tglKirim=src.tanggal_serah_terima; }   // link tgl serah terima dari order
+    else { try{ const { data:sh }=await sb.from('shipments').select('tanggal_terima,tanggal_kirim').eq('order_id',oid).order('tanggal_kirim',{ascending:false}).limit(1);
+      if(sh&&sh[0]){ ord.tglKirim=sh[0].tanggal_terima||sh[0].tanggal_kirim||ord.tglKirim; } }catch(e){} }   // fallback: dari Pengiriman
     await saveSales(mo,b); render();
   });
 
@@ -4600,7 +4984,7 @@ function bindEvents(){
   c.querySelectorAll('[data-update-pay]').forEach(el=>el.onclick=()=>paySubmit(el.dataset.updatePay,el.dataset.row));
   c.querySelectorAll('[data-edit-pay]').forEach(el=>el.onclick=()=>{ const[oid,pid]=el.dataset.editPay.split(':'); editing['pay_'+oid]=pid; render(); });
   c.querySelectorAll('[data-cancel-pay]').forEach(el=>el.onclick=()=>{ delete editing['pay_'+el.dataset.cancelPay]; render(); });
-  c.querySelectorAll('[data-del-pay]').forEach(el=>el.onclick=async()=>{ const[oid,pid]=el.dataset.delPay.split(':'); const mo=state.currentMonth; const b=findBuyerOfOrder(mo,oid); const o=findOrder(mo,b,oid); const p=(o.payments||[]).find(x=>x.id===pid); if(p&&p.txId){ try{ await sb.from('transactions').delete().eq('id',p.txId); }catch(e){} } o.payments=o.payments.filter(x=>x.id!==pid); await saveSales(mo,b); orderFinance=null; finReport=null; dashData=null; ledgerCache=null; render(); });
+  c.querySelectorAll('[data-del-pay]').forEach(el=>el.onclick=async()=>{ const[oid,pid]=el.dataset.delPay.split(':'); const mo=state.currentMonth; const b=findBuyerOfOrder(mo,oid); const o=findOrder(mo,b,oid); const p=(o.payments||[]).find(x=>x.id===pid); if(p&&p.txId){ try{ await sb.from('transactions').delete().eq('id',p.txId); }catch(e){} } o.payments=o.payments.filter(x=>x.id!==pid); await saveSales(mo,b); orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null; render(); });
 
   // investor / petty
   const addInv=c.querySelector('[data-add-inv]'); if(addInv) addInv.onclick=()=>invSubmit(null);
@@ -4653,13 +5037,14 @@ async function paySubmit(orderId,rowId){
   const mo=state.currentMonth, b=findBuyerOfOrder(mo,orderId), o=findOrder(mo,b,orderId);
   const nominal=num('pNom_'+orderId); if(!nominal) return;
   const data={tgl:val('pTgl_'+orderId),jenis:sel('pJenis_'+orderId),nominal,noKwitansi:val('pKw_'+orderId)};
-  // Jembatan ke Supabase: pembayaran buku-kas -> transaksi (masuk ke Arus Kas/Laporan)
+  // Penjualan → Arus Kas: DP/pelunasan buyer di sini tercatat sebagai UANG MASUK (sumber tunggal pendapatan).
   const buyerNm=(state.buyers.find(x=>x.id===b)||{}).name||'';
-  const txPayload={ tanggal:data.tgl||today(), arah:'masuk', jenis:(data.jenis==='DP'?'dp':'pelunasan'), jumlah:nominal, kategori:'Penjualan', catatan:`${buyerNm} · ${o.noInvoice||o.noPI||'-'}` };
+  const txPayload={ tanggal:data.tgl||today(), arah:'masuk', jenis:(data.jenis==='DP'?'dp':'pelunasan'), jumlah:nominal, kategori:'Penjualan', order_id:(o.linkedOrderId||null), catatan:`Inv ${o.noInvoice||o.noPI||'-'} · ${buyerNm}` };
   if(rowId){
     const i=o.payments.findIndex(x=>x.id===rowId);
     if(i>=0){ const old=o.payments[i]; o.payments[i]={...old,...data};
-      if(old.txId){ try{ await sb.from('transactions').update(txPayload).eq('id',old.txId); }catch(e){} } }
+      if(old.txId){ try{ await sb.from('transactions').update(txPayload).eq('id',old.txId); }catch(e){} }
+      else { try{ const { data:tx }=await sb.from('transactions').insert(txPayload).select('id').single(); if(tx) o.payments[i].txId=tx.id; }catch(e){} } }
     delete editing['pay_'+orderId];
   } else {
     let txId=null;
@@ -4667,7 +5052,7 @@ async function paySubmit(orderId,rowId){
     o.payments.push({id:uid(),...data,txId});
   }
   await saveSales(mo,b);
-  orderFinance=null; finReport=null; dashData=null; ledgerCache=null;
+  ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ordersCache=null;
   render();
 }
 async function invSubmit(invId){

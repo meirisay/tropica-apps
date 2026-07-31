@@ -151,4 +151,10 @@ alter table public.supplier_bills add column if not exists pakai_ppn boolean def
 alter table public.order_docs    add column if not exists pakai_ppn boolean default true;
 alter table public.orders        add column if not exists pakai_ppn boolean default true;
 
+-- [17] Tgl serah terima barang pada order (untuk link ke Penjualan)
+alter table public.orders add column if not exists tanggal_serah_terima date;
+
+-- [18] Aset tetap: simpan id transaksi kas keluar terkait (biar bisa dihapus bersih)
+alter table public.aset_tetap add column if not exists transaction_id uuid;
+
 -- Selesai. Setelah muncul "Success", buka aplikasi dan uji coba.
