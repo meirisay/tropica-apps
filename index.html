@@ -2147,7 +2147,9 @@ function txKet(t){
   const label=TX_JENIS_LABEL[t.jenis]||t.jenis;
   const parts=[label];
   if(t.arah==='masuk' && t.buyer_name) parts.push(t.buyer_name);
-  if(t.kategori && t.kategori!==label) parts.push(t.kategori);
+  // invoice/PI dari dokumen order (kalau catatan belum memuat "Inv")
+  if((t.jenis==='dp'||t.jenis==='pelunasan') && t.invNo && !/inv[ :]/i.test(t.catatan||'')) parts.push('Inv '+t.invNo);
+  if(t.kategori && t.kategori!==label && t.kategori!=='Penjualan') parts.push(t.kategori);
   if(t.catatan) parts.push(t.catatan);
   return parts.join(' · ');
 }
@@ -2157,7 +2159,16 @@ function setKasOrder(v){ kasOrderFilter=v; render(); }
 // Cache bersama data berat (dipakai ulang antar tab Ringkasan/HPP/Penjualan/Laporan/Arus kas)
 let vsData=null, txData=null;
 async function getVS(){ if(vsData) return vsData; try{ const { data }=await sb.from('v_order_summary').select('id,no_order,status,nilai_jual,hpp,laba,piutang,masuk_buyer'); vsData=data||[]; }catch(e){ vsData=vsData||[]; } return vsData; }
-async function getTX(){ if(txData) return txData; try{ let { data,error }=await sb.from('transactions').select('id,tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order,buyers(nama))').order('tanggal'); if(error){ const r=await sb.from('transactions').select('id,tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order)').order('tanggal'); data=r.data; } txData=(data||[]).map(t=>({...t, buyer_name:(t.orders&&t.orders.buyers)?t.orders.buyers.nama:null})); }catch(e){ txData=txData||[]; } return txData; }
+async function getTX(){ if(txData) return txData; try{
+  let { data,error }=await sb.from('transactions').select('id,tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order,buyers(nama))').order('tanggal');
+  if(error){ const r=await sb.from('transactions').select('id,tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order)').order('tanggal'); data=r.data; }
+  // Nomor PI/Invoice per order (dari order_docs) untuk melengkapi keterangan DP/pelunasan yang ber-order
+  const docMap={}; try{ const { data:docs }=await sb.from('order_docs').select('order_id,jenis,nomor');
+    const rank=j=>j==='invoice'?3:(j==='pi_dp'?2:1);
+    (docs||[]).forEach(d=>{ if(!d.order_id||!d.nomor) return; const cur=docMap[d.order_id]; if(!cur||rank(d.jenis)>rank(cur.jenis)) docMap[d.order_id]={jenis:d.jenis,nomor:d.nomor}; });
+  }catch(e){}
+  txData=(data||[]).map(t=>({...t, buyer_name:(t.orders&&t.orders.buyers)?t.orders.buyers.nama:null, invNo:(t.order_id&&docMap[t.order_id])?docMap[t.order_id].nomor:null }));
+}catch(e){ txData=txData||[]; } return txData; }
 async function loadLedger(){
   try{
     const data=await getTX();
@@ -2220,7 +2231,7 @@ function viewKasModule(){
   }).join('');
   const stat=(l,v,c)=>`<div class="o-stat"><div class="l">${l}</div><div class="v" style="${c?`color:${c}`:''}">${rp(v)}</div></div>`;
   return `<div class="o-wrap">
-    <div class="o-head"><h2 class="o-title">Arus Kas</h2><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${monthSelectHTML()}<select class="o-input" onchange="setKasOrder(this.value)" style="width:auto;padding:8px 10px">${oOpts}</select>${canWr?'<button class="o-btn ghost" id="kasDiag">🔍 Cek dobel</button><button class="o-btn" id="kasNew">+ Catat transaksi</button>':''}</div></div>
+    <div class="o-head"><h2 class="o-title">Arus Kas</h2><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${monthSelectHTML()}<select class="o-input" onchange="setKasOrder(this.value)" style="width:auto;padding:8px 10px">${oOpts}</select>${canWr?'<button class="o-btn ghost" id="kasSync">🔧 Rapikan DP/pelunasan</button><button class="o-btn ghost" id="kasDiag">🔍 Cek dobel</button><button class="o-btn" id="kasNew">+ Catat transaksi</button>':''}</div></div>
     <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Periode: <b>${periodeLabel()}</b>${kasOrderFilter==='all'?'':' · Order: <b>'+esc(kasOrderFilter)+'</b>'}. DP/pelunasan (dari Penjualan), bayar supplier, biaya usaha, modal. Saldo = saldo bank berjalan (semua order).</p>
     <div class="o-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-bottom:14px">
       ${ym?stat('Saldo awal bulan', opening, 'var(--ink-soft)'):''}
@@ -2299,6 +2310,34 @@ async function deleteTxSafe(id){
   const { error }=await sb.from('transactions').delete().eq('id',id);
   return error?{error:error.message}:{};
 }
+// Rapikan DP/pelunasan yang SUDAH ada di Arus Kas: isi No order yang kosong (dari baris kembar
+// yang sudah ber-order) + hapus baris dobel. Tidak mengubah alur, tidak minta input ulang.
+async function syncPenjualanToArusKas(){
+  if(!confirm('Rapikan DP/pelunasan di Arus Kas?\n\n• Baris yang No order-nya kosong akan diisi otomatis dari baris kembar yang sudah punya order.\n• Baris dobel (order+jumlah sama) dibuang, disisakan yang ada invoice-nya.\n\nAman diulang.')) return;
+  const btn=document.getElementById('kasSync'); if(btn){ btn.disabled=true; btn.textContent='Merapikan…'; }
+  const { data:tx, error }=await sb.from('transactions').select('id,jenis,jumlah,order_id,kategori,catatan').in('jenis',['dp','pelunasan']);
+  if(error){ alert('Gagal memuat: '+error.message); if(btn){ btn.disabled=false; btn.textContent='🔧 Rapikan DP/pelunasan'; } return; }
+  const key=t=>Math.round(Number(t.jumlah)||0)+'|'+t.jenis;
+  // 1) peta jumlah|jenis → order_id (dari transaksi yang SUDAH punya order)
+  const amtToOrder={}; (tx||[]).forEach(t=>{ if(t.order_id && !amtToOrder[key(t)]) amtToOrder[key(t)]=t.order_id; });
+  let filled=0, unfilled=0;
+  for(const t of (tx||[])){
+    if(!t.order_id){ const oid=amtToOrder[key(t)]; if(oid){ await sb.from('transactions').update({order_id:oid}).eq('id',t.id); t.order_id=oid; filled++; } else unfilled++; }
+  }
+  // 2) hapus dobel: dalam grup (order_id|jumlah|jenis), kalau ada versi Penjualan (ber-invoice) DAN versi kartu order,
+  //    simpan yang Penjualan, buang yang kartu order.
+  const groups={}; (tx||[]).forEach(t=>{ if(!t.order_id) return; const k=t.order_id+'|'+key(t); (groups[k]||(groups[k]=[])).push(t); });
+  let removed=0;
+  for(const k in groups){
+    const g=groups[k]; if(g.length<2) continue;
+    const penj=g.filter(t=>t.kategori==='Penjualan' || /inv/i.test(t.catatan||''));
+    const cards=g.filter(t=>!(t.kategori==='Penjualan' || /inv/i.test(t.catatan||'')));
+    if(penj.length && cards.length){ for(const c of cards){ await sb.from('transactions').delete().eq('id',c.id); removed++; } }
+  }
+  ledgerCache=null; txData=null; finReport=null; dashData=null; hppCache=null; vsData=null; ordersCache=null;
+  alert(`Selesai.\n• ${filled} baris diisi No order${unfilled?` (${unfilled} belum ketemu pasangannya)`:''}\n• ${removed} baris dobel dihapus`);
+  render();
+}
 // Panel diagnosa Arus Kas: ringkasan + daftar dugaan transaksi dobel, bisa dihapus 1-per-1.
 async function openKasDiag(){
   let ov=document.getElementById('kasDiagOverlay'); if(ov) ov.remove();
@@ -2358,6 +2397,7 @@ function bindKasModule(){
     return; }
   const n=document.getElementById('kasNew'); if(n) n.onclick=()=>{ kasEditId=null; kasForm=true; render(); };
   const dg=document.getElementById('kasDiag'); if(dg) dg.onclick=openKasDiag;
+  const sy=document.getElementById('kasSync'); if(sy) sy.onclick=syncPenjualanToArusKas;
   document.querySelectorAll('[data-editkas]').forEach(el=>el.onclick=()=>{ kasEditId=el.dataset.editkas; kasForm=true; render(); });
   document.querySelectorAll('[data-delkas]').forEach(el=>el.onclick=()=>delKas(el.dataset.delkas));
 }
