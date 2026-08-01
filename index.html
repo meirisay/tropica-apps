@@ -819,6 +819,8 @@ function statusBadge(s){
 }
 function escAttr(s){ return esc(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;'); }
 
+// Urut nomor order menaik (001, 002, …) — numeric-aware; dipakai daftar berbasis order (bukan Arus Kas).
+function byOrderNo(a,b){ return String(a==null?'':a).localeCompare(String(b==null?'':b),'id',{numeric:true,sensitivity:'base'}); }
 // ===== Editor rincian item (jenis teh) — dipakai Order, PI Sample, PO keluar =====
 function isOngkir(it){ return ((it.satuan||'').toLowerCase()==='ongkir') || ((it.nama||'').toLowerCase()==='ongkir'); }
 function itemsTotal(items){ return (items||[]).filter(it=>!isOngkir(it)).reduce((s,it)=>s+(Number(it.qty)||0)*(Number(it.harga)||0),0); }
@@ -967,7 +969,7 @@ async function deleteBuyer(id){
 function viewOrderList(){
   const all=ordersCache||[];
   const isDone=o=>o.status==='lunas'||o.status==='batal';
-  const list = hideDone ? all.filter(o=>!isDone(o)) : all;
+  const list = (hideDone ? all.filter(o=>!isDone(o)) : all).slice().sort((a,b)=>byOrderNo(a.no_order,b.no_order));
   const doneCount=all.filter(isDone).length;
   const rows=list.map(o=>{
     const piut=(Number(o.nilai_jual)||0)-(Number(o.total_bayar_buyer)||0);
@@ -1570,8 +1572,8 @@ function viewPembelian(){
   const buyerNames=[...new Set(base.filter(b=>b.jenis==='pemenuhan_po').map(buyerOf).filter(Boolean))].sort();
   const bOpts=`<option value="all" ${pembelianBuyer==='all'?'selected':''}>Semua buyer</option>`+buyerNames.map(n=>`<option value="${escAttr(n)}" ${pembelianBuyer===n?'selected':''}>${esc(n)}</option>`).join('');
   const buyerMatch=b=> pembelianBuyer==='all' || buyerOf(b)===pembelianBuyer;
-  const forPO=base.filter(b=>b.jenis==='pemenuhan_po' && buyerMatch(b));
-  const umum=(pembelianBuyer==='all'?base.filter(b=>b.jenis!=='pemenuhan_po'):[]);
+  const forPO=base.filter(b=>b.jenis==='pemenuhan_po' && buyerMatch(b)).sort((a,b)=>byOrderNo(a.order_no,b.order_no)||byOrderNo(a.no_tagihan,b.no_tagihan));
+  const umum=(pembelianBuyer==='all'?base.filter(b=>b.jenis!=='pemenuhan_po'):[]).sort((a,b)=>byOrderNo(a.no_tagihan,b.no_tagihan));
   const totPO=forPO.reduce((s,b)=>s+(Number(b.nilai)||0),0);
   const totUmum=umum.reduce((s,b)=>s+(Number(b.nilai)||0),0);
   const itemLine=b=>b.items&&b.items.length?`<div style="font-weight:400;font-size:11px;color:var(--ink-soft)">${esc(itemSummary(b.items))}</div>`:'';
@@ -2502,7 +2504,7 @@ function viewHppModule(){
   const opsMap=opsPoByOrder();     // {order_id: total OPS pemenuhan PO}
   const inVatMap=inputVatByOrder(); // {order_id: PPN masukan (bisa dikreditkan)}
   let nj=0,raw=0,ops=0,hpp=0,laba=0;
-  const rows=hppCache.map(o=>{
+  const rows=hppCache.slice().sort((a,b)=>byOrderNo(a.no_order,b.no_order)).map(o=>{
     const njGross=Number(o.nilai_jual)||0;
     const njNetto=njGross-Math.round(njGross*11/111);      // nilai jual tanpa PPN keluaran
     const rawNetto=(Number(o.hpp)||0)-(Number(inVatMap[o.id])||0); // raw material tanpa PPN masukan (kredit)
@@ -2727,7 +2729,7 @@ function bindPpnModule(){
 function viewPenjualanReport(){
   if(hppCache===null){ loadHpp(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
   let nj=0,masuk=0,piut=0;
-  const rows=hppCache.map(o=>{
+  const rows=hppCache.slice().sort((a,b)=>byOrderNo(a.no_order,b.no_order)).map(o=>{
     const m=Number(o.masuk_buyer)||0, p=Number(o.piutang)||0;
     nj+=Number(o.nilai_jual)||0; masuk+=m; piut+=p;
     return `<tr>
@@ -3117,7 +3119,7 @@ async function saveEditPO(){
   orderSummary={}; poCache=null; billsCache=null; ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; poView='list'; editPOId=null; render();
 }
 function viewPOList(){
-  const rows=poCache.map(p=>`<tr>
+  const rows=poCache.slice().sort((a,b)=>byOrderNo(a.order_no,b.order_no)||byOrderNo(a.no_po,b.no_po)).map(p=>`<tr>
       <td style="font-weight:600;color:var(--tea-dark)">${esc(p.no_po)}${p.items&&p.items.length?`<div style="font-weight:400;font-size:11px;color:var(--ink-soft)">${esc(itemSummary(p.items))}</div>`:''}</td>
       <td>${esc(p.order_no)}</td>
       <td>${esc(p.supplier_name)}</td>
@@ -3504,7 +3506,7 @@ function viewTagihanList(){
   const total=belum.reduce((s,b)=>s+(Number(b.sisa)||0),0);
   const totalRaw=belum.filter(b=>b.jenis!=='operasional').reduce((s,b)=>s+(Number(b.sisa)||0),0);
   const totalOp=belum.filter(b=>b.jenis==='operasional').reduce((s,b)=>s+(Number(b.sisa)||0),0);
-  const rows=billsCache.map(b=>{
+  const rows=billsCache.slice().sort((a,b)=>byOrderNo(a.order_no,b.order_no)||byOrderNo(a.no_tagihan,b.no_tagihan)).map(b=>{
     const du=daysUntil(b.jatuh_tempo);
     const tempo=b.jatuh_tempo?`${fmtLong(b.jatuh_tempo)}${(du!=null&&du<0&&b.sisa>0)?` <span style="color:var(--danger)">(telat ${-du}h)</span>`:''}`:'-';
     return `<tr>
@@ -3607,7 +3609,7 @@ function bindTagihan(){
 function viewPembayaranModule(){
   if(billsCache===null){ if(!billLoading) loadBills(); return `<div class="o-card">Memuat…</div>`; }
   const canWr=canSeeCost();
-  const sortedBills=billsCache.slice().sort((a,b)=>String(b.order_no||'').localeCompare(String(a.order_no||''))); // urut order, 001 di bawah
+  const sortedBills=billsCache.slice().sort((a,b)=>byOrderNo(a.order_no,b.order_no)||byOrderNo(a.no_tagihan,b.no_tagihan)); // urut order, 001 di atas
   const rows=sortedBills.map(b=>{
     const sisa=Number(b.sisa)||0;
     const paying=payingBillId===b.id;
