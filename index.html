@@ -3201,7 +3201,7 @@ async function refreshBillStatus(billId){
   if(!b) return;
   const { data:ps }=await sb.from('bill_payments').select('jumlah').eq('bill_id',billId);
   const paid=(ps||[]).reduce((s,p)=>s+(Number(p.jumlah)||0),0);
-  const status=paid>=(Number(b.nilai)||0)-0.5?'lunas':(paid>0?'sebagian':'belum');
+  const status=paid>=(Number(b.nilai)||0)-1?'lunas':(paid>0?'sebagian':'belum');
   await sb.from('supplier_bills').update({status}).eq('id',billId);
   if(b.po_id) await sb.from('purchase_orders').update({bayar_status:status}).eq('id',b.po_id);
 }
@@ -3451,9 +3451,13 @@ function openDocPrint(docId){
 // ===== Hutang usaha: Tagihan supplier + Pembayaran (Langkah 8) =====
 const BILL_JENIS=[['pemenuhan_po','Pemenuhan PO (masuk HPP)'],['operasional','Operasional (biaya usaha)']];
 function billStatusBadge(b){
+  const nilai=Number(b.nilai)||0, paid=(b.paid!=null)?(Number(b.paid)||0):null, sisa=(b.sisa!=null)?(Number(b.sisa)||0):null;
+  let lunas,sebagian;
+  if(sisa!=null){ lunas = nilai>0 && sisa<=0; sebagian = !lunas && (paid||0)>0; } // dari sisa (sudah dijepit) — tahan status DB basi
+  else { lunas=b.status==='lunas'; sebagian=b.status==='sebagian'; }
   let bg='#FBF1D8',fg='#8A5B0E',label='Belum bayar';
-  if(b.status==='lunas'){bg='#E4F0E8';fg='#1D6B4F';label='Lunas';}
-  else if(b.status==='sebagian'){bg='#E6EEF6';fg='#1B4E7A';label='Sebagian';}
+  if(lunas){bg='#E4F0E8';fg='#1D6B4F';label='Lunas';}
+  else if(sebagian){bg='#E6EEF6';fg='#1B4E7A';label='Sebagian';}
   return `<span class="o-badge" style="background:${bg};color:${fg}">${label}</span>`;
 }
 async function loadBills(){
@@ -3490,7 +3494,7 @@ async function loadBills(){
   }
   const { data:pays }=await sb.from('bill_payments').select('id,bill_id,tanggal,jumlah,transaction_id').order('tanggal');
   const paid={}, payMap={}; (pays||[]).forEach(p=>{ paid[p.bill_id]=(paid[p.bill_id]||0)+(Number(p.jumlah)||0); (payMap[p.bill_id]||(payMap[p.bill_id]=[])).push(p); });
-  billsCache.forEach(b=>{ b.paid=paid[b.id]||0; b.sisa=(Number(b.nilai)||0)-b.paid; b.payments=payMap[b.id]||[]; });
+  billsCache.forEach(b=>{ b.paid=paid[b.id]||0; const s=(Number(b.nilai)||0)-b.paid; b.sisa=Math.abs(s)<1?0:Math.round(s); b.payments=payMap[b.id]||[]; }); // jepit sisa <1 rupiah ke 0 (hindari "-0" & status keliru)
   billLoading=false;
   render();
 }
@@ -3510,14 +3514,14 @@ function viewTagihanList(){
     const du=daysUntil(b.jatuh_tempo);
     const tempo=b.jatuh_tempo?`${fmtLong(b.jatuh_tempo)}${(du!=null&&du<0&&b.sisa>0)?` <span style="color:var(--danger)">(telat ${-du}h)</span>`:''}`:'-';
     return `<tr>
-      <td style="font-weight:600;color:var(--tea-dark)">${esc(b.no_tagihan||'-')}</td>
-      <td>${jenisLabel(b.jenis)}</td>
-      <td>${esc(b.order_no)}</td>
-      <td>${esc(b.supplier_name)}</td>
-      <td style="text-align:right">${rp(b.nilai)}</td>
-      <td style="text-align:right">${rp(b.sisa)}</td>
-      <td>${tempo}</td>
-      <td>${billStatusBadge(b)}</td>
+      <td style="font-weight:600;color:var(--tea-dark);white-space:nowrap">${esc(b.no_tagihan||'-')}</td>
+      <td style="white-space:nowrap">${jenisLabel(b.jenis)}</td>
+      <td style="white-space:nowrap">${esc(b.order_no)}</td>
+      <td style="white-space:nowrap">${esc(b.supplier_name)}</td>
+      <td style="text-align:right;white-space:nowrap">${rp(b.nilai)}</td>
+      <td style="text-align:right;white-space:nowrap">${rp(b.sisa)}</td>
+      <td style="white-space:nowrap">${tempo}</td>
+      <td style="white-space:nowrap">${billStatusBadge(b)}</td>
       <td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-editbill="${b.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delbill="${b.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>
     </tr>`;
   }).join('');
