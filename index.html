@@ -1455,7 +1455,7 @@ function bindSampleTab(){
 // ===== Piutang Buyer (diambil dari Penjualan / buku-kas, semua bulan) =====
 let allMonthsLoaded=false;
 async function ensureAllMonths(){
-  for(const mo of state.months){ await ensureMonth(mo); }
+  await Promise.all((state.months||[]).map(mo=>ensureMonth(mo))); // paralel antar bulan (jauh lebih cepat)
   allMonthsLoaded=true; render();
 }
 function viewPiutangBuyer(){
@@ -1632,9 +1632,11 @@ let modalForm=null; // null | 'setoran' | 'investor' | 'bagi'
 let editSetoranId=null, editInvestorId=null;
 async function loadModal(){
   try{
-    const inv=await sb.from('investors').select('*').order('nama');
-    const set=await sb.from('modal_setoran').select('*').order('tanggal');
-    const bh=await sb.from('bagi_hasil').select('*,investors(nama)').order('tanggal',{ascending:false});
+    const [inv,set,bh]=await Promise.all([
+      sb.from('investors').select('*').order('nama'),
+      sb.from('modal_setoran').select('*').order('tanggal'),
+      sb.from('bagi_hasil').select('*,investors(nama)').order('tanggal',{ascending:false})
+    ]);
     investorsCache=inv.data||[]; modalSetoranCache=set.data||[];
     bagiHasilCache=(bh.data||[]).map(x=>({...x, investor_nama:x.investors?x.investors.nama:'—'}));
   }catch(e){ investorsCache=investorsCache||[]; modalSetoranCache=modalSetoranCache||[]; bagiHasilCache=bagiHasilCache||[]; }
@@ -2161,18 +2163,27 @@ let ledgerCache=null; let kasForm=false; let hppCache=null;
 let kasEditId=null; let kasOrderFilter='all';
 function setKasOrder(v){ kasOrderFilter=v; render(); }
 // Cache bersama data berat (dipakai ulang antar tab Ringkasan/HPP/Penjualan/Laporan/Arus kas)
-let vsData=null, txData=null;
-async function getVS(){ if(vsData) return vsData; try{ const { data }=await sb.from('v_order_summary').select('id,no_order,status,nilai_jual,hpp,laba,piutang,masuk_buyer'); vsData=data||[]; }catch(e){ vsData=vsData||[]; } return vsData; }
-async function getTX(){ if(txData) return txData; try{
-  let { data,error }=await sb.from('transactions').select('id,tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order,buyers(nama))').order('tanggal');
-  if(error){ const r=await sb.from('transactions').select('id,tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order)').order('tanggal'); data=r.data; }
-  // Nomor PI/Invoice per order (dari order_docs) untuk melengkapi keterangan DP/pelunasan yang ber-order
-  const docMap={}; try{ const { data:docs }=await sb.from('order_docs').select('order_id,jenis,nomor');
-    const rank=j=>j==='invoice'?3:(j==='pi_dp'?2:1);
-    (docs||[]).forEach(d=>{ if(!d.order_id||!d.nomor) return; const cur=docMap[d.order_id]; if(!cur||rank(d.jenis)>rank(cur.jenis)) docMap[d.order_id]={jenis:d.jenis,nomor:d.nomor}; });
-  }catch(e){}
-  txData=(data||[]).map(t=>({...t, buyer_name:(t.orders&&t.orders.buyers)?t.orders.buyers.nama:null, invNo:(t.order_id&&docMap[t.order_id])?docMap[t.order_id].nomor:null }));
-}catch(e){ txData=txData||[]; } return txData; }
+let vsData=null, txData=null, vsPromise=null, txPromise=null;
+// Dedup fetch: kalau beberapa view minta data yang sama BERSAMAAN, cukup 1 query (simpan promise-nya).
+async function getVS(){
+  if(vsData) return vsData;
+  if(!vsPromise) vsPromise=(async()=>{ try{ const { data }=await sb.from('v_order_summary').select('id,no_order,status,nilai_jual,hpp,laba,piutang,masuk_buyer'); vsData=data||[]; }catch(e){ vsData=vsData||[]; } vsPromise=null; return vsData; })();
+  return vsPromise;
+}
+async function getTX(){
+  if(txData) return txData;
+  if(!txPromise) txPromise=(async()=>{ try{
+    let { data,error }=await sb.from('transactions').select('id,tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order,buyers(nama))').order('tanggal');
+    if(error){ const r=await sb.from('transactions').select('id,tanggal,arah,jenis,jumlah,kategori,catatan,order_id,orders(no_order)').order('tanggal'); data=r.data; }
+    // Nomor PI/Invoice per order (dari order_docs) untuk melengkapi keterangan DP/pelunasan yang ber-order
+    const docMap={}; try{ const { data:docs }=await sb.from('order_docs').select('order_id,jenis,nomor');
+      const rank=j=>j==='invoice'?3:(j==='pi_dp'?2:1);
+      (docs||[]).forEach(d=>{ if(!d.order_id||!d.nomor) return; const cur=docMap[d.order_id]; if(!cur||rank(d.jenis)>rank(cur.jenis)) docMap[d.order_id]={jenis:d.jenis,nomor:d.nomor}; });
+    }catch(e){}
+    txData=(data||[]).map(t=>({...t, buyer_name:(t.orders&&t.orders.buyers)?t.orders.buyers.nama:null, invNo:(t.order_id&&docMap[t.order_id])?docMap[t.order_id].nomor:null }));
+  }catch(e){ txData=txData||[]; } txPromise=null; return txData; })();
+  return txPromise;
+}
 async function loadLedger(){
   try{
     const data=await getTX();
@@ -2410,9 +2421,12 @@ function bindKasModule(){
 }
 // ---- Biaya Usaha (dari transactions jenis=biaya_usaha) ----
 function viewBiayaModule(){
-  if(billsCache===null){ if(!billLoading) loadBills(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
-  if(ordersCache===null){ if(!orderLoading) loadOrders(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
-  if(ledgerCache===null){ loadLedger(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
+  if(billsCache===null || ordersCache===null || ledgerCache===null){
+    if(billsCache===null && !billLoading) loadBills();
+    if(ordersCache===null && !orderLoading) loadOrders();
+    if(ledgerCache===null) loadLedger();
+    return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`;
+  }
   const num=n=>(Number(n)||0).toLocaleString('id-ID');
   const ym = finMonth==='all'?null:finMonth;
   const inMo=d=> !ym || String(d||'').slice(0,7)===ym;
@@ -2498,9 +2512,12 @@ function viewBiayaModule(){
 }
 // ---- HPP & Laba per order (dari v_order_summary) ----
 function viewHppModule(){
-  if(hppCache===null){ loadHpp(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
-  if(ledgerCache===null){ loadLedger(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
-  if(billsCache===null){ if(!billLoading) loadBills(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
+  if(hppCache===null || ledgerCache===null || billsCache===null){
+    if(hppCache===null) loadHpp();
+    if(ledgerCache===null) loadLedger();
+    if(billsCache===null && !billLoading) loadBills();
+    return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`;
+  }
   const opsMap=opsPoByOrder();     // {order_id: total OPS pemenuhan PO}
   const inVatMap=inputVatByOrder(); // {order_id: PPN masukan (bisa dikreditkan)}
   let nj=0,raw=0,ops=0,hpp=0,laba=0;
@@ -2559,8 +2576,8 @@ let ppnKeluaranCache=null;
 async function loadPpnKeluaran(){
   const recs=[];
   try{
+    await Promise.all((state.months||[]).map(mo=>ensureMonth(mo))); // muat semua bulan paralel dulu
     for(const mo of (state.months||[])){
-      await ensureMonth(mo);
       for(const b of (state.buyers||[])){
         (getOrders(mo,b.id)||[]).forEach(o=>{
           const c=orderCalc(o); const ppnTot=Math.round(c.ppn); if(ppnTot<=0) return;
@@ -2580,9 +2597,13 @@ async function loadPpnKeluaran(){
   ppnKeluaranCache=recs; render();
 }
 function viewPpnModule(){
-  if(ppnKeluaranCache===null){ loadPpnKeluaran(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
-  if(ledgerCache===null){ loadLedger(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
-  if(billsCache===null){ if(!billLoading) loadBills(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
+  // Muat ketiga sumber (PPN keluaran, ledger, tagihan) PARALEL, bukan bergantian.
+  if(ppnKeluaranCache===null || ledgerCache===null || billsCache===null){
+    if(ppnKeluaranCache===null) loadPpnKeluaran();
+    if(ledgerCache===null) loadLedger();
+    if(billsCache===null && !billLoading) loadBills();
+    return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`;
+  }
   if(ppnForm) return viewPpnForm();
   const canWr=canSeeCost();
   const n=x=>Number(x)||0;
