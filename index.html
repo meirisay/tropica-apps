@@ -790,6 +790,7 @@ function setBiayaOrder(v){ biayaOrder=v; render(); }
 let billLoading = false;
 let poBillBackfilled = false; // sekali per sesi: buat tagihan (hutang) untuk PO lama yang belum punya
 let payingBillId = null;
+let editPayId = null; // id bill_payments yang sedang diubah tanggalnya
 let editBillId = null;
 let orderPayments = {};
 let buyerPayFormOpen = false;
@@ -3485,9 +3486,9 @@ async function loadBills(){
       }
     }catch(e){ console.error('backfill PO→tagihan gagal', e); }
   }
-  const { data:pays }=await sb.from('bill_payments').select('bill_id,jumlah');
-  const paid={}; (pays||[]).forEach(p=>{ paid[p.bill_id]=(paid[p.bill_id]||0)+(Number(p.jumlah)||0); });
-  billsCache.forEach(b=>{ b.paid=paid[b.id]||0; b.sisa=(Number(b.nilai)||0)-b.paid; });
+  const { data:pays }=await sb.from('bill_payments').select('id,bill_id,tanggal,jumlah,transaction_id').order('tanggal');
+  const paid={}, payMap={}; (pays||[]).forEach(p=>{ paid[p.bill_id]=(paid[p.bill_id]||0)+(Number(p.jumlah)||0); (payMap[p.bill_id]||(payMap[p.bill_id]=[])).push(p); });
+  billsCache.forEach(b=>{ b.paid=paid[b.id]||0; b.sisa=(Number(b.nilai)||0)-b.paid; b.payments=payMap[b.id]||[]; });
   billLoading=false;
   render();
 }
@@ -3605,6 +3606,7 @@ function bindTagihan(){
 }
 function viewPembayaranModule(){
   if(billsCache===null){ if(!billLoading) loadBills(); return `<div class="o-card">Memuat…</div>`; }
+  const canWr=canSeeCost();
   const sortedBills=billsCache.slice().sort((a,b)=>String(b.order_no||'').localeCompare(String(a.order_no||''))); // urut order, 001 di bawah
   const rows=sortedBills.map(b=>{
     const sisa=Number(b.sisa)||0;
@@ -3617,6 +3619,21 @@ function viewPembayaranModule(){
         <button class="o-btn ghost" id="payCancel">Batal</button>
       </div><div id="payErr" style="color:var(--danger);font-size:12px"></div>
     </td></tr>`:'';
+    // Riwayat pembayaran tagihan ini — bisa ubah tanggal / hapus (untuk koreksi tanggal bayar supplier di Arus Kas)
+    const payHist=(b.payments||[]).map(p=> editPayId===p.id
+      ? `<tr><td colspan="7" style="background:#FBF8EF">
+          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:6px 0">
+            <div><label class="o-field" style="margin:0 0 4px">Ubah tanggal bayar</label><input class="o-input" id="epTgl" type="date" value="${p.tanggal||''}" style="width:150px"></div>
+            <button class="o-btn" data-savepaydate="${p.id}">Simpan</button>
+            <button class="o-btn ghost" id="epCancel">Batal</button>
+          </div>
+        </td></tr>`
+      : `<tr style="background:#FCFBF7">
+          <td></td>
+          <td colspan="4" style="color:var(--ink-soft);font-size:12px">↳ dibayar ${p.tanggal?fmtLong(p.tanggal):'-'}</td>
+          <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${rp(p.jumlah)}</td>
+          <td style="text-align:right;white-space:nowrap">${canWr?`<button class="o-btn ghost" data-editpaydate="${p.id}" style="padding:3px 8px">Ubah tgl</button> <button class="o-btn ghost" data-delpay="${p.id}" data-tx="${p.transaction_id||''}" data-bill="${b.id}" style="padding:3px 8px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:''}</td>
+        </tr>`).join('');
     return `<tr>
       <td style="font-weight:600;color:var(--tea-dark)">${esc(b.no_tagihan||'-')}</td>
       <td>${esc(b.supplier_name)}</td>
@@ -3625,7 +3642,7 @@ function viewPembayaranModule(){
       <td style="text-align:right">${rp(b.paid)}</td>
       <td style="text-align:right">${rp(sisa)}</td>
       <td style="text-align:right">${sisa>0.001?`<button class="o-btn ghost" data-pay="${b.id}" style="padding:4px 11px">Bayar</button>`:billStatusBadge(b)}</td>
-    </tr>${payForm}`;
+    </tr>${payForm}${payHist}`;
   }).join('');
   const total=billsCache.reduce((s,b)=>s+Math.max(0,Number(b.sisa)||0),0);
   return `<div class="o-wrap">
@@ -3639,13 +3656,33 @@ function viewPembayaranModule(){
         <tbody>${rows||`<tr><td colspan="7" class="o-empty">Belum ada tagihan.</td></tr>`}</tbody>
       </table>
     </div>
-    <p style="color:var(--ink-soft);font-size:12px;margin-top:10px">Yang sudah lunas tetap tampil. Membayar otomatis tercatat sebagai kas keluar di Arus kas dan mengisi HPP order.</p>
+    <p style="color:var(--ink-soft);font-size:12px;margin-top:10px">Yang sudah lunas tetap tampil. Membayar otomatis tercatat sebagai kas keluar di Arus kas. Tiap pembayaran (baris "↳ dibayar …") bisa <b>Ubah tgl</b> (kalau tanggal bayarnya salah) atau <b>Hapus</b> — perubahan ikut ke Arus Kas.</p>
   </div>`;
 }
 function bindPembayaran(){
-  document.querySelectorAll('[data-pay]').forEach(b=>b.onclick=()=>{ payingBillId=b.dataset.pay; render(); });
+  document.querySelectorAll('[data-pay]').forEach(b=>b.onclick=()=>{ payingBillId=b.dataset.pay; editPayId=null; render(); });
   const cx=document.getElementById('payCancel'); if(cx) cx.onclick=()=>{ payingBillId=null; render(); };
   const sv=document.getElementById('paySave'); if(sv) sv.onclick=savePayment;
+  document.querySelectorAll('[data-editpaydate]').forEach(b=>b.onclick=()=>{ editPayId=b.dataset.editpaydate; payingBillId=null; render(); });
+  const epc=document.getElementById('epCancel'); if(epc) epc.onclick=()=>{ editPayId=null; render(); };
+  document.querySelectorAll('[data-savepaydate]').forEach(b=>b.onclick=()=>savePayDate(b.dataset.savepaydate));
+  document.querySelectorAll('[data-delpay]').forEach(b=>b.onclick=()=>delPay(b.dataset.delpay, b.dataset.tx||null, b.dataset.bill));
+}
+// Ubah tanggal 1 pembayaran supplier: sinkron ke bill_payments + transaksi Arus Kas yang menaut.
+async function savePayDate(payId){
+  const el=document.getElementById('epTgl'); const tgl=el?el.value:''; if(!tgl) return;
+  let txId=null; (billsCache||[]).forEach(b=>(b.payments||[]).forEach(p=>{ if(p.id===payId) txId=p.transaction_id; }));
+  const { error }=await sb.from('bill_payments').update({ tanggal:tgl }).eq('id',payId);
+  if(error){ alert('Gagal ubah tanggal: '+error.message); return; }
+  if(txId) await sb.from('transactions').update({ tanggal:tgl }).eq('id',txId);
+  editPayId=null; billsCache=null; ledgerCache=null; vsData=null; txData=null; finReport=null; dashData=null; hppCache=null; orderFinance=null; render();
+}
+// Hapus 1 pembayaran supplier: ikut hapus uang keluar di Arus Kas + segarkan status tagihan/PO.
+async function delPay(payId, txId, billId){
+  if(!confirm('Hapus pembayaran ini? Uang keluar di Arus Kas ikut terhapus, dan tagihan kembali dianggap belum dibayar sejumlah itu.')) return;
+  if(txId){ const r=await deleteTxSafe(txId); if(r&&r.error){ alert('Gagal hapus: '+r.error); return; } }
+  else { await sb.from('bill_payments').delete().eq('id',payId); await refreshBillStatus(billId); }
+  editPayId=null; billsCache=null; ledgerCache=null; vsData=null; txData=null; finReport=null; dashData=null; hppCache=null; orderFinance=null; render();
 }
 async function savePayment(){
   const err=document.getElementById('payErr'); if(err) err.textContent='';
