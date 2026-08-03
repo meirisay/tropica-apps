@@ -2255,7 +2255,8 @@ function viewKasModule(){
     masukT+=masuk; keluarT+=keluar;
     const ket=txKet(t);
     const editable=canWr && !t._ro && ['biaya_usaha','modal','lain'].includes(t.jenis); // Edit form hanya utk transaksi manual
-    const deletable=canWr && !t._ro; // semua transaksi nyata bisa DIHAPUS (utk beresin yang nyangkut, mis. bayar supplier)
+    // Boleh hapus: biaya usaha, modal manual, lain, bayar supplier. TIDAK boleh hapus pembayaran buyer (dp/pelunasan) — kelola di kartu order/Penjualan biar tak salah hapus.
+    const deletable=canWr && !t._ro && t.jenis!=='dp' && t.jenis!=='pelunasan';
     return `<tr>
       <td style="white-space:nowrap">${t.tanggal?fmtLong(t.tanggal):'-'}</td>
       <td>${esc(ket)}</td>
@@ -3598,13 +3599,10 @@ function viewTagihanList(){
     const du=daysUntil(b.jatuh_tempo);
     const tempo=b.jatuh_tempo?`${fmtLong(b.jatuh_tempo)}${(du!=null&&du<0&&b.sisa>0)?` <span style="color:var(--danger)">(telat ${-du}h)</span>`:''}`:'-';
     return `<tr>
-      <td style="font-weight:600;color:var(--tea-dark)">${esc(b.no_tagihan||'-')}<div style="margin-top:3px">${jenisLabel(b.jenis)}</div></td>
-      <td>${esc(b.order_no)}</td>
+      <td style="font-weight:600;color:var(--tea-dark)">${esc(b.no_tagihan||'-')}<div style="margin-top:3px;font-weight:400;font-size:11px;color:var(--ink-soft)">${jenisLabel(b.jenis)} · ${esc(b.order_no||'—')}</div></td>
       <td>${esc(b.supplier_name)}</td>
-      <td style="text-align:right;white-space:nowrap">${rp(b.nilai)}</td>
-      <td style="text-align:right;white-space:nowrap">${rp(b.sisa)}</td>
-      <td>${tempo}</td>
-      <td>${billStatusBadge(b)}</td>
+      <td style="text-align:right;white-space:nowrap">${rp(b.nilai)}<div style="font-size:11px;color:${(Number(b.sisa)||0)>0?'var(--danger)':'#1D6B4F'}">sisa ${rp(b.sisa)}</div></td>
+      <td>${tempo}<div style="margin-top:3px">${billStatusBadge(b)}</div></td>
       <td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-editbill="${b.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delbill="${b.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>
     </tr>`;
   }).join('');
@@ -3617,9 +3615,9 @@ function viewTagihanList(){
       <div class="o-stat"><div class="l">— Operasional</div><div class="v" style="font-size:16px">${rp(totalOp)}</div></div>
     </div>
     <div class="o-card" style="padding:0;overflow:hidden">
-      <table class="o-table" style="width:100%;table-layout:fixed">
-        <thead><tr><th style="width:16%">No tagihan</th><th style="width:11%">Order</th><th style="width:20%">Supplier</th><th style="width:12%;text-align:right">Nilai</th><th style="width:12%;text-align:right">Sisa</th><th style="width:11%">Jatuh tempo</th><th style="width:8%">Status</th><th style="width:10%"></th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="8" class="o-empty">Belum ada tagihan.</td></tr>`}</tbody>
+      <table class="o-table" style="width:100%">
+        <thead><tr><th>Tagihan</th><th>Supplier</th><th style="text-align:right">Nilai / Sisa</th><th>Jatuh tempo / Status</th><th style="text-align:right">Aksi</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="5" class="o-empty">Belum ada tagihan.</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
@@ -3704,7 +3702,7 @@ function viewPembayaranModule(){
     const sisa=Number(b.sisa)||0;
     const paying=payingBillId===b.id;
     const lastPay=(b.payments||[]).slice().sort((x,y)=>String(x.tanggal||'').localeCompare(String(y.tanggal||''))).pop();
-    const payForm=paying?`<tr><td colspan="9" style="background:#FBF8EF">
+    const payForm=paying?`<tr><td colspan="5" style="background:#FBF8EF">
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:6px 0">
         <div><label class="o-field" style="margin:0 0 4px">Jumlah bayar</label><input class="o-input" id="payJumlah" type="number" value="${Math.round(sisa)}" style="width:150px"></div>
         <div><label class="o-field" style="margin:0 0 4px">Tanggal bayar</label><input class="o-input" id="payTgl" type="date" value="${today()}" style="width:150px"></div>
@@ -3713,7 +3711,7 @@ function viewPembayaranModule(){
       </div><div id="payErr" style="color:var(--danger);font-size:12px"></div>
     </td></tr>`:'';
     const editingPay = lastPay && editPayId===lastPay.id;
-    const editForm=editingPay?`<tr><td colspan="9" style="background:#FBF8EF">
+    const editForm=editingPay?`<tr><td colspan="5" style="background:#FBF8EF">
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:6px 0">
         <div><label class="o-field" style="margin:0 0 4px">Ubah tanggal bayar</label><input class="o-input" id="epTgl" type="date" value="${lastPay.tanggal||''}" style="width:150px"></div>
         <button class="o-btn" data-savepaydate="${lastPay.id}">Simpan</button>
@@ -3721,17 +3719,12 @@ function viewPembayaranModule(){
       </div>
     </td></tr>`:'';
     // Aksi: Bayar selalu ada selama masih ada sisa; + Ubah tgl/Hapus bila sudah ada pembayaran.
-    const aksi = `${sisa>0?`<button class="o-btn" data-pay="${b.id}" style="padding:4px 11px">Bayar</button> `:''}${(canWr&&lastPay)?`<button class="o-btn ghost" data-editpaydate="${lastPay.id}" style="padding:3px 8px">Ubah tgl</button> <button class="o-btn ghost" data-delpay="${lastPay.id}" data-tx="${lastPay.transaction_id||''}" data-bill="${b.id}" style="padding:3px 8px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:''}`;
+    const aksi = `${sisa>0?`<button class="o-btn" data-pay="${b.id}" style="padding:4px 11px">Bayar</button><br>`:''}${(canWr&&lastPay)?`<button class="o-btn ghost" data-editpaydate="${lastPay.id}" style="padding:3px 8px;margin-top:4px">Ubah tgl</button> <button class="o-btn ghost" data-delpay="${lastPay.id}" data-tx="${lastPay.transaction_id||''}" data-bill="${b.id}" style="padding:3px 8px;margin-top:4px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:''}`;
     return `<tr>
-      <td style="font-weight:600;color:var(--tea-dark);white-space:nowrap">${esc(b.no_tagihan||'-')}</td>
-      <td style="white-space:nowrap">${esc(b.order_no||'—')}</td>
-      <td style="white-space:nowrap">${esc(b.supplier_name)}</td>
-      <td style="white-space:nowrap">${b.tanggal_terima?fmtLong(b.tanggal_terima):'—'}</td>
-      <td style="text-align:right;white-space:nowrap">${rp(b.nilai)}</td>
-      <td style="text-align:right;white-space:nowrap">${rp(b.paid)}</td>
-      <td style="white-space:nowrap">${lastPay&&lastPay.tanggal?fmtLong(lastPay.tanggal):'—'}</td>
-      <td style="text-align:right;white-space:nowrap">${rp(sisa)}</td>
-      <td style="white-space:nowrap">${billStatusBadge(b)}</td>
+      <td style="font-weight:600;color:var(--tea-dark)">${esc(b.no_tagihan||'-')}<div style="margin-top:2px;font-weight:400;font-size:11px;color:var(--ink-soft)">${esc(b.order_no||'—')}${b.tanggal_terima?' · terima '+fmtLong(b.tanggal_terima):''}</div></td>
+      <td>${esc(b.supplier_name)}</td>
+      <td style="text-align:right;white-space:nowrap">${rp(b.nilai)}<div style="font-size:11px;color:var(--ink-soft)">dibayar ${rp(b.paid)}${lastPay&&lastPay.tanggal?' · '+fmtLong(lastPay.tanggal):''}</div></td>
+      <td style="text-align:right;white-space:nowrap">${rp(sisa)}<div style="margin-top:2px">${billStatusBadge(b)}</div></td>
       <td style="text-align:right;white-space:nowrap">${aksi}</td>
     </tr>${payForm}${editForm}`;
   }).join('');
@@ -3741,10 +3734,10 @@ function viewPembayaranModule(){
     <div class="o-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px">
       <div class="o-stat"><div class="l">Total belum dibayar</div><div class="v">${rp(total)}</div></div>
     </div>
-    <div class="o-card" style="padding:0;overflow-x:auto">
-      <table class="o-table">
-        <thead><tr><th>No tagihan</th><th>Order</th><th>Supplier</th><th>Tgl terima</th><th style="text-align:right">Nilai</th><th style="text-align:right">Dibayar</th><th>Tgl bayar</th><th style="text-align:right">Sisa</th><th>Status</th><th style="text-align:right">Aksi</th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="10" class="o-empty">Belum ada tagihan.</td></tr>`}</tbody>
+    <div class="o-card" style="padding:0;overflow:hidden">
+      <table class="o-table" style="width:100%">
+        <thead><tr><th>Tagihan</th><th>Supplier</th><th style="text-align:right">Nilai / Dibayar</th><th style="text-align:right">Sisa / Status</th><th style="text-align:right">Aksi</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="5" class="o-empty">Belum ada tagihan.</td></tr>`}</tbody>
       </table>
     </div>
     <p style="color:var(--ink-soft);font-size:12px;margin-top:10px">Klik <b>Bayar</b> untuk melunasi (otomatis jadi kas keluar di Arus Kas). Yang sudah dibayar bisa <b>Ubah tgl</b> / <b>Hapus</b>.</p>
