@@ -1425,14 +1425,30 @@ async function loadSampleDocIds(){
   render();
 }
 function sampleRowsHTML(list){
-  return list.map(o=>`<tr class="o-row" data-open="${o.id}">
+  const canWr=canSeeCost();
+  return list.map(o=>{
+    const belumJadiJual = (Number(o.nilai_jual)||0)<=0 && (Number(o.nilai_sample)||0)>0;
+    const aksi = (canWr && belumJadiJual) ? `<button class="o-btn ghost" data-tosale="${o.id}" style="padding:3px 8px" title="Salin Nilai sample → Nilai jual, agar dihitung sebagai pendapatan">→ Jadikan penjualan</button>` : '';
+    return `<tr class="o-row" data-open="${o.id}">
       <td style="font-weight:600;color:var(--tea-dark)">${o.no_order}</td>
       <td>${o.buyer_name}</td>
       <td style="color:var(--ink-soft);font-size:12px">${esc(itemSummary(o.items))||'—'}</td>
       <td style="text-align:right">${rp(o.nilai_sample)}</td>
       <td style="text-align:right">${Number(o.nilai_jual)>0?rp(o.nilai_jual):'—'}</td>
       <td>${statusBadge(o.status)}</td>
-    </tr>`).join('');
+      <td style="text-align:right;white-space:nowrap">${aksi}</td>
+    </tr>`;
+  }).join('');
+}
+// Sample berbayar → jadikan penjualan: salin Nilai sample ke Nilai jual + status 'po' → masuk Penjualan/HPP/Laporan.
+async function sampleToSale(id){
+  const o=(ordersCache||[]).find(x=>x.id===id); if(!o) return;
+  const ns=Number(o.nilai_sample)||0;
+  if(ns<=0){ alert('Nilai sample masih kosong. Isi Nilai sample dulu (Edit order), atau langsung isi Nilai jual.'); return; }
+  if(!confirm(`Jadikan penjualan?\n\nNilai jual akan diisi ${rp(ns)} (dari Nilai sample) dan order ini dihitung sebagai pendapatan di Penjualan/HPP/Laporan.\n\nCatat pembayaran buyer-nya lewat kartu order setelah ini.`)) return;
+  const { error }=await sb.from('orders').update({ nilai_jual:ns, status:'po' }).eq('id',id);
+  if(error){ alert('Gagal: '+error.message); return; }
+  ordersCache=null; vsData=null; hppCache=null; finReport=null; dashData=null; ppnKeluaranCache=null; render();
 }
 function viewSampleTab(){
   if(ordersCache===null){ if(!orderLoading) loadOrders(); return `<div class="o-card">Memuat…</div>`; }
@@ -1442,8 +1458,8 @@ function viewSampleTab(){
   const riwayat=ordersCache.filter(o=>o.status!=='sample' && o.status!=='batal' && hadSample(o));
   const tbl=(rows,empty)=>`<div class="o-card" style="padding:0;overflow:hidden">
       <table class="o-table">
-        <thead><tr><th>No order</th><th>Buyer</th><th>Jenis teh</th><th style="text-align:right">Nilai sample</th><th style="text-align:right">Nilai PO</th><th>Status</th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="6" class="o-empty">${empty}</td></tr>`}</tbody>
+        <thead><tr><th>No order</th><th>Buyer</th><th>Jenis teh</th><th style="text-align:right">Nilai sample</th><th style="text-align:right">Nilai PO</th><th>Status</th><th></th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="7" class="o-empty">${empty}</td></tr>`}</tbody>
       </table>
     </div>`;
   return `<div class="o-wrap">
@@ -1457,6 +1473,7 @@ function viewSampleTab(){
 }
 function bindSampleTab(){
   document.querySelectorAll('.o-row').forEach(r=>r.onclick=()=>{ openOrderId=r.dataset.open; pjOrderId=r.dataset.open; activeTab='doc_jual'; sampleFormOpen=false; poFormOpen=false; buyerPayFormOpen=false; render(); });
+  document.querySelectorAll('[data-tosale]').forEach(b=>b.onclick=(e)=>{ e.stopPropagation(); sampleToSale(b.dataset.tosale); });
 }
 
 // ===== Piutang Buyer (diambil dari Penjualan / buku-kas, semua bulan) =====
@@ -2585,7 +2602,7 @@ function masaLabel(masa){ if(!/^\d{4}-\d{2}$/.test(masa||'')) return masa||'(tan
 // PPN KELUARAN sumbernya = menu Penjualan (buku kas): PPN per item + tanggal Faktur Pajak (fpDp/fpPel).
 // Masa pajak = bulan tgl FP. PPN dibagi DP vs pelunasan sesuai dpPct (masing2 ke tgl FP-nya).
 let ppnKeluaranCache=null;
-async function loadPpnKeluaran(){
+async function computePpnKeluaran(){
   const recs=[];
   try{
     await Promise.all((state.months||[]).map(mo=>ensureMonth(mo))); // muat semua bulan paralel dulu
@@ -2606,7 +2623,20 @@ async function loadPpnKeluaran(){
       }
     }
   }catch(e){}
-  ppnKeluaranCache=recs; render();
+  return recs;
+}
+async function loadPpnKeluaran(){ ppnKeluaranCache=await computePpnKeluaran(); render(); }
+// Ringkasan PPN terpadu (dipakai menu PPN & Laporan/Neraca) → hasil selalu sama.
+// keluaran dari recs (FP Penjualan), masukan dari tagihan pemenuhan_po ber-PPN, disetor dari transaksi 'Setoran PPN'.
+function ppnSummaryFrom(recs, bills, ledger){
+  const n=x=>Number(x)||0;
+  const byMonth={}; const M=k=>byMonth[k]||(byMonth[k]={out:0,in:0,d:0});
+  (recs||[]).forEach(r=>{ M(r.masa||'(tanpa tgl FP)').out+=n(r.ppn); });
+  (bills||[]).forEach(b=>{ if(b.jenis!=='pemenuhan_po') return; const v=billInputVat(b); if(!v) return; const masa=(b.tanggal_terima||'').slice(0,7)||'(tanpa tgl)'; M(masa).in+=v; });
+  (ledger||[]).forEach(t=>{ if(t.kategori==='Setoran PPN'){ const masa=(String(t.catatan||'').match(/(\d{4}-\d{2})/)||[])[1]||(t.tanggal||'').slice(0,7); M(masa).d+=n(t.jumlah); } });
+  let totOut=0,totIn=0,totBayar=0,totD=0;
+  Object.keys(byMonth).forEach(k=>{ const r=byMonth[k]; totOut+=r.out; totIn+=r.in; totBayar+=Math.max(0,r.out-r.in); totD+=r.d; });
+  return {byMonth, totOut, totIn, totBayar, totD, sisaTot:Math.max(0,totBayar-totD)};
 }
 function viewPpnModule(){
   // Muat ketiga sumber (PPN keluaran, ledger, tagihan) PARALEL, bukan bergantian.
@@ -2836,11 +2866,14 @@ async function loadFinReport(){
   const pinjamanBelum=pj.filter(p=>p.status!=='lunas'&&m(p.tanggal)).reduce((s,x)=>s+n(x.jumlah),0);
   const paid={}; bpays.forEach(p=>{ paid[p.bill_id]=(paid[p.bill_id]||0)+n(p.jumlah); });
   const supplierSisa=bills.filter(b=>m(b.tanggal_terima)).reduce((s,b)=>s+Math.max(0,n(b.nilai)-(paid[b.id]||0)),0);
-  // PPN: keluaran (ditagih ke buyer) − masukan (kredit dari pembelian ber-PPN) = kurang bayar (yang harus disetor).
-  const pajakMasukan=bills.filter(b=>b.jenis==='pemenuhan_po'&&m(b.tanggal_terima)).reduce((s,b)=>s+billInputVat(b),0);
-  const ppnKurangBayar=Math.max(0, ppn - pajakMasukan);
-  const pajakDisetor=txF.filter(t=>t.kategori==='Setoran PPN').reduce((s,t)=>s+n(t.jumlah),0);
-  const hutangPajak=Math.max(0, ppnKurangBayar - pajakDisetor);
+  // PPN untuk Neraca — pakai ringkasan yang SAMA dengan menu PPN (keluaran dari FP Penjualan) supaya angkanya cocok.
+  // Ini SALDO (all-time), bukan per bulan: hutang pajak = sisa yang belum disetor secara keseluruhan.
+  if(ppnKeluaranCache===null) ppnKeluaranCache=await computePpnKeluaran();
+  const ppnSum=ppnSummaryFrom(ppnKeluaranCache, bills, tx);
+  const pajakMasukan=ppnSum.totIn;
+  const ppnKurangBayar=ppnSum.totBayar;
+  const pajakDisetor=ppnSum.totD;
+  const hutangPajak=ppnSum.sisaTot;
   const totalHutang=pinjamanBelum+supplierSisa+hutangPajak;
   const setoranModal=ms.filter(x=>m(x.tanggal)).reduce((s,x)=>s+n(x.jumlah),0);
   const bagiHasil=bh.filter(x=>m(x.tanggal)).reduce((s,x)=>s+n(x.jumlah),0);
