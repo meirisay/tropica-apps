@@ -744,7 +744,7 @@ function renderTabs(){
   t.querySelectorAll('[data-tab]').forEach(el=>el.onclick=()=>navTo(el.dataset.tab));
 }
 function updateMonthbar(){
-  const fin=(activeTab==='penjualan' && penjualanShown); // toolbar bulan/Buyer hanya saat Penjualan ditampilkan
+  const fin=(activeTab==='penjualan'); // Penjualan pakai toolbar bulan + Buyer
   ['monthSelect','addBuyerBtn','whoName'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display=fin?'':'none'; });
   if(!fin){ ['addMonthForm','addBuyerForm'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; }); }
   const tb=document.getElementById('toolbar'); if(tb) tb.style.display=fin?'':'none';
@@ -3598,14 +3598,13 @@ function viewTagihanList(){
     const du=daysUntil(b.jatuh_tempo);
     const tempo=b.jatuh_tempo?`${fmtLong(b.jatuh_tempo)}${(du!=null&&du<0&&b.sisa>0)?` <span style="color:var(--danger)">(telat ${-du}h)</span>`:''}`:'-';
     return `<tr>
-      <td style="font-weight:600;color:var(--tea-dark);white-space:nowrap">${esc(b.no_tagihan||'-')}</td>
-      <td style="white-space:nowrap">${jenisLabel(b.jenis)}</td>
-      <td style="white-space:nowrap">${esc(b.order_no)}</td>
-      <td style="white-space:nowrap">${esc(b.supplier_name)}</td>
+      <td style="font-weight:600;color:var(--tea-dark)">${esc(b.no_tagihan||'-')}<div style="margin-top:3px">${jenisLabel(b.jenis)}</div></td>
+      <td>${esc(b.order_no)}</td>
+      <td>${esc(b.supplier_name)}</td>
       <td style="text-align:right;white-space:nowrap">${rp(b.nilai)}</td>
       <td style="text-align:right;white-space:nowrap">${rp(b.sisa)}</td>
-      <td style="white-space:nowrap">${tempo}</td>
-      <td style="white-space:nowrap">${billStatusBadge(b)}</td>
+      <td>${tempo}</td>
+      <td>${billStatusBadge(b)}</td>
       <td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-editbill="${b.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delbill="${b.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>
     </tr>`;
   }).join('');
@@ -3617,10 +3616,10 @@ function viewTagihanList(){
       <div class="o-stat"><div class="l">— Raw material</div><div class="v" style="font-size:16px">${rp(totalRaw)}</div></div>
       <div class="o-stat"><div class="l">— Operasional</div><div class="v" style="font-size:16px">${rp(totalOp)}</div></div>
     </div>
-    <div class="o-card" style="padding:0;overflow:auto">
-      <table class="o-table">
-        <thead><tr><th>No tagihan</th><th>Jenis</th><th>Order</th><th>Supplier</th><th style="text-align:right">Nilai</th><th style="text-align:right">Sisa</th><th>Jatuh tempo</th><th>Status</th><th></th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="9" class="o-empty">Belum ada tagihan.</td></tr>`}</tbody>
+    <div class="o-card" style="padding:0;overflow:hidden">
+      <table class="o-table" style="width:100%;table-layout:fixed">
+        <thead><tr><th style="width:16%">No tagihan</th><th style="width:11%">Order</th><th style="width:20%">Supplier</th><th style="width:12%;text-align:right">Nilai</th><th style="width:12%;text-align:right">Sisa</th><th style="width:11%">Jatuh tempo</th><th style="width:8%">Status</th><th style="width:10%"></th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="8" class="o-empty">Belum ada tagihan.</td></tr>`}</tbody>
       </table>
     </div>
   </div>`;
@@ -3679,10 +3678,13 @@ async function saveBill(){
   orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; billView='list'; render();
 }
 async function deleteBill(id){
-  if(!confirm('Hapus tagihan ini? Pembayaran yang tercatat ikut terhapus.')) return;
+  if(!confirm('Hapus tagihan ini? Pembayaran yang tercatat (termasuk uang keluar di Arus Kas) ikut terhapus.')) return;
+  // Hapus pembayaran + transaksi kas yang menaut DULU, supaya tidak ada transaksi yatim di Arus Kas.
+  const { data:bp }=await sb.from('bill_payments').select('id,transaction_id').eq('bill_id',id);
+  for(const p of (bp||[])){ if(p.transaction_id) await sb.from('transactions').delete().eq('id',p.transaction_id); await sb.from('bill_payments').delete().eq('id',p.id); }
   const { error }=await sb.from('supplier_bills').delete().eq('id',id);
   if(error){ alert('Gagal hapus: '+error.message); return; }
-  orderSummary={}; billsCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render();
+  orderSummary={}; billsCache=null; ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render();
 }
 function bindTagihan(){
   const nb=document.getElementById('billNew'); if(nb) nb.onclick=()=>{ billView='new'; render(); };
@@ -3702,33 +3704,34 @@ function viewPembayaranModule(){
     const sisa=Number(b.sisa)||0;
     const paying=payingBillId===b.id;
     const lastPay=(b.payments||[]).slice().sort((x,y)=>String(x.tanggal||'').localeCompare(String(y.tanggal||''))).pop();
-    const payForm=paying?`<tr><td colspan="7" style="background:#FBF8EF">
+    const payForm=paying?`<tr><td colspan="9" style="background:#FBF8EF">
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:6px 0">
         <div><label class="o-field" style="margin:0 0 4px">Jumlah bayar</label><input class="o-input" id="payJumlah" type="number" value="${Math.round(sisa)}" style="width:150px"></div>
-        <div><label class="o-field" style="margin:0 0 4px">Tanggal</label><input class="o-input" id="payTgl" type="date" value="${today()}" style="width:150px"></div>
-        <button class="o-btn" id="paySave">Bayar</button>
+        <div><label class="o-field" style="margin:0 0 4px">Tanggal bayar</label><input class="o-input" id="payTgl" type="date" value="${today()}" style="width:150px"></div>
+        <button class="o-btn" id="paySave">Simpan bayar</button>
         <button class="o-btn ghost" id="payCancel">Batal</button>
       </div><div id="payErr" style="color:var(--danger);font-size:12px"></div>
     </td></tr>`:'';
     const editingPay = lastPay && editPayId===lastPay.id;
-    const editForm=editingPay?`<tr><td colspan="7" style="background:#FBF8EF">
+    const editForm=editingPay?`<tr><td colspan="9" style="background:#FBF8EF">
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:6px 0">
         <div><label class="o-field" style="margin:0 0 4px">Ubah tanggal bayar</label><input class="o-input" id="epTgl" type="date" value="${lastPay.tanggal||''}" style="width:150px"></div>
         <button class="o-btn" data-savepaydate="${lastPay.id}">Simpan</button>
         <button class="o-btn ghost" id="epCancel">Batal</button>
       </div>
     </td></tr>`:'';
-    // Kolom aksi (1 baris): belum lunas → Bayar; sudah dibayar → status + Ubah tgl/Hapus pembayaran terakhir.
-    const aksi = sisa>0
-      ? `<button class="o-btn ghost" data-pay="${b.id}" style="padding:4px 11px">Bayar</button>`
-      : `${billStatusBadge(b)}${(canWr&&lastPay)?` <button class="o-btn ghost" data-editpaydate="${lastPay.id}" style="padding:3px 8px">Ubah tgl</button> <button class="o-btn ghost" data-delpay="${lastPay.id}" data-tx="${lastPay.transaction_id||''}" data-bill="${b.id}" style="padding:3px 8px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:''}`;
+    // Aksi: Bayar selalu ada selama masih ada sisa; + Ubah tgl/Hapus bila sudah ada pembayaran.
+    const aksi = `${sisa>0?`<button class="o-btn" data-pay="${b.id}" style="padding:4px 11px">Bayar</button> `:''}${(canWr&&lastPay)?`<button class="o-btn ghost" data-editpaydate="${lastPay.id}" style="padding:3px 8px">Ubah tgl</button> <button class="o-btn ghost" data-delpay="${lastPay.id}" data-tx="${lastPay.transaction_id||''}" data-bill="${b.id}" style="padding:3px 8px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:''}`;
     return `<tr>
       <td style="font-weight:600;color:var(--tea-dark);white-space:nowrap">${esc(b.no_tagihan||'-')}</td>
+      <td style="white-space:nowrap">${esc(b.order_no||'—')}</td>
       <td style="white-space:nowrap">${esc(b.supplier_name)}</td>
-      <td style="white-space:nowrap">${esc(b.order_no)}</td>
+      <td style="white-space:nowrap">${b.tanggal_terima?fmtLong(b.tanggal_terima):'—'}</td>
       <td style="text-align:right;white-space:nowrap">${rp(b.nilai)}</td>
-      <td style="text-align:right;white-space:nowrap">${rp(b.paid)}${lastPay&&lastPay.tanggal?` <span style="color:var(--ink-soft);font-size:11px">· ${fmtLong(lastPay.tanggal)}</span>`:''}</td>
+      <td style="text-align:right;white-space:nowrap">${rp(b.paid)}</td>
+      <td style="white-space:nowrap">${lastPay&&lastPay.tanggal?fmtLong(lastPay.tanggal):'—'}</td>
       <td style="text-align:right;white-space:nowrap">${rp(sisa)}</td>
+      <td style="white-space:nowrap">${billStatusBadge(b)}</td>
       <td style="text-align:right;white-space:nowrap">${aksi}</td>
     </tr>${payForm}${editForm}`;
   }).join('');
@@ -3738,13 +3741,13 @@ function viewPembayaranModule(){
     <div class="o-grid" style="grid-template-columns:repeat(auto-fit,minmax(160px,1fr));margin-bottom:14px">
       <div class="o-stat"><div class="l">Total belum dibayar</div><div class="v">${rp(total)}</div></div>
     </div>
-    <div class="o-card" style="padding:0;overflow:hidden">
+    <div class="o-card" style="padding:0;overflow-x:auto">
       <table class="o-table">
-        <thead><tr><th>No tagihan</th><th>Supplier</th><th>Order</th><th style="text-align:right">Nilai</th><th style="text-align:right">Dibayar</th><th style="text-align:right">Sisa</th><th></th></tr></thead>
-        <tbody>${rows||`<tr><td colspan="7" class="o-empty">Belum ada tagihan.</td></tr>`}</tbody>
+        <thead><tr><th>No tagihan</th><th>Order</th><th>Supplier</th><th>Tgl terima</th><th style="text-align:right">Nilai</th><th style="text-align:right">Dibayar</th><th>Tgl bayar</th><th style="text-align:right">Sisa</th><th>Status</th><th style="text-align:right">Aksi</th></tr></thead>
+        <tbody>${rows||`<tr><td colspan="10" class="o-empty">Belum ada tagihan.</td></tr>`}</tbody>
       </table>
     </div>
-    <p style="color:var(--ink-soft);font-size:12px;margin-top:10px">Kolom <b>Dibayar</b> menampilkan jumlah + tanggal bayar. Membayar otomatis tercatat sebagai kas keluar di Arus kas. Untuk yang sudah dibayar bisa <b>Ubah tgl</b> (kalau tanggal salah) atau <b>Hapus</b> — perubahan ikut ke Arus Kas.</p>
+    <p style="color:var(--ink-soft);font-size:12px;margin-top:10px">Klik <b>Bayar</b> untuk melunasi (otomatis jadi kas keluar di Arus Kas). Yang sudah dibayar bisa <b>Ubah tgl</b> / <b>Hapus</b>.</p>
   </div>`;
 }
 function bindPembayaran(){
@@ -4279,21 +4282,7 @@ function render(){
   if(activeTab==='biaya'){ c.innerHTML=viewBiayaModule(); return; }
   if(activeTab==='profit'){ c.innerHTML=viewHppModule(); return; }
   if(activeTab==='ppn'){ c.innerHTML=viewPpnModule(); bindPpnModule(); return; }
-  if(activeTab==='penjualan'){
-    if(!penjualanShown){
-      c.innerHTML=`<div class="o-wrap"><div class="o-card" style="text-align:center;padding:40px 20px">
-        <p style="margin:0 0 14px;color:var(--ink-soft)">Data Penjualan disembunyikan.</p>
-        <button class="o-btn" id="penjShow">👁 Tampilkan Penjualan</button>
-      </div></div>`;
-      const sb2=document.getElementById('penjShow'); if(sb2) sb2.onclick=()=>{ penjualanShown=true; render(); };
-      return;
-    }
-    if(ordersCache===null && !orderLoading) loadOrders();
-    c.innerHTML=`<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="o-btn ghost" id="penjHide">🙈 Sembunyikan</button></div>`+viewPenjualan();
-    bindEvents(); renderOverlay();
-    const hb=document.getElementById('penjHide'); if(hb) hb.onclick=()=>{ penjualanShown=false; render(); };
-    return;
-  }
+  if(activeTab==='penjualan'){ if(ordersCache===null && !orderLoading) loadOrders(); c.innerHTML=viewPenjualan(); bindEvents(); renderOverlay(); return; }
   if(activeTab==='report'){ c.innerHTML=viewLaporan(); bindLaporan(); return; }
   if(activeTab==='doc_jual'){ c.innerHTML=viewPenjualanLink(); bindPenjualanLink(); return; }
   if(!views[activeTab]){ c.innerHTML=viewPlaceholder(activeTab); return; }
