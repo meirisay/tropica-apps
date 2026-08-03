@@ -513,7 +513,11 @@ let editing = {}; // various keys -> id / true
 let collapsed = {}; // orderId -> true when hidden
 
 const EN_MONTHS=['January','February','March','April','May','June','July','August','September','October','November','December'];
-function fmtLong(dateStr){ if(!dateStr) return '-'; const d=new Date(dateStr); if(isNaN(d)) return dateStr; return `${d.getDate()} ${EN_MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
+// Parse 'YYYY-MM-DD' sebagai tanggal LOKAL (bukan UTC) → tidak ada geser 1 hari karena zona waktu.
+function _pad2(n){ return String(n).padStart(2,'0'); }
+function parseYMD(s){ if(!s) return null; const p=String(s).slice(0,10).split('-'); if(p.length<3) return null; const d=new Date(Number(p[0]),Number(p[1])-1,Number(p[2])); return isNaN(d)?null:d; }
+function ymd(d){ return `${d.getFullYear()}-${_pad2(d.getMonth()+1)}-${_pad2(d.getDate())}`; }
+function fmtLong(dateStr){ const d=parseYMD(dateStr); if(!d) return dateStr||'-'; return `${d.getDate()} ${EN_MONTHS[d.getMonth()]} ${d.getFullYear()}`; }
 
 function rp(n){ n=Number(n)||0; return 'Rp'+Math.round(n).toLocaleString('id-ID'); }
 // sel uang untuk dokumen cetak: "Rp" rata kiri, angka rata kanan (digit sejajar)
@@ -524,9 +528,9 @@ function catLabel(id){ return (CATS.find(c=>c.id===id)||{}).label || '-'; }
 function unitOpts(sel){ return UNITS.map(u=>`<option value="${u}" ${u===sel?'selected':''}>${u}</option>`).join(''); }
 function buyerName(id){ return (state.buyers.find(b=>b.id===id)||{}).name || '-'; }
 function esc(s){ return (s==null?'':String(s)); }
-function addDays(dateStr,days){ if(!dateStr) return ''; const d=new Date(dateStr); if(isNaN(d)) return ''; d.setDate(d.getDate()+(Number(days)||0)); return d.toISOString().slice(0,10); }
-function today(){ return new Date().toISOString().slice(0,10); }
-function daysUntil(dateStr){ if(!dateStr) return null; const d=new Date(dateStr), t=new Date(today()); if(isNaN(d)) return null; return Math.round((d-t)/86400000); }
+function addDays(dateStr,days){ const d=parseYMD(dateStr); if(!d) return ''; d.setDate(d.getDate()+(Number(days)||0)); return ymd(d); }
+function today(){ return ymd(new Date()); }
+function daysUntil(dateStr){ const d=parseYMD(dateStr); if(!d) return null; const t=parseYMD(today()); return Math.round((d-t)/86400000); }
 function genInvoice(dateStr){
   const seq = state.invSeq || 1077;
   const d = dateStr ? new Date(dateStr) : new Date();
@@ -740,7 +744,7 @@ function renderTabs(){
   t.querySelectorAll('[data-tab]').forEach(el=>el.onclick=()=>navTo(el.dataset.tab));
 }
 function updateMonthbar(){
-  const fin=(activeTab==='penjualan'); // Penjualan pakai model buku-kas per-bulan (butuh toolbar bulan + Buyer); modul lain order-based
+  const fin=(activeTab==='penjualan' && penjualanShown); // toolbar bulan/Buyer hanya saat Penjualan ditampilkan
   ['monthSelect','addBuyerBtn','whoName'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display=fin?'':'none'; });
   if(!fin){ ['addMonthForm','addBuyerForm'].forEach(id=>{ const el=document.getElementById(id); if(el) el.style.display='none'; }); }
   const tb=document.getElementById('toolbar'); if(tb) tb.style.display=fin?'':'none';
@@ -787,6 +791,9 @@ let pembelianBuyer = 'all'; // filter Pembelian per buyer
 function setPembelianBuyer(v){ pembelianBuyer=v; render(); }
 let biayaOrder = 'all'; // filter Biaya Usaha per order
 function setBiayaOrder(v){ biayaOrder=v; render(); }
+let pembelianOrder = 'all'; // filter Pembelian per order
+function setPembelianOrder(v){ pembelianOrder=v; render(); }
+let penjualanShown = false; // Penjualan disembunyikan dulu; tampil saat klik tombol mata
 let billLoading = false;
 let poBillBackfilled = false; // sekali per sesi: buat tagihan (hutang) untuk PO lama yang belum punya
 let payingBillId = null;
@@ -1572,7 +1579,10 @@ function viewPembelian(){
   const buyerNames=[...new Set(base.filter(b=>b.jenis==='pemenuhan_po').map(buyerOf).filter(Boolean))].sort();
   const bOpts=`<option value="all" ${pembelianBuyer==='all'?'selected':''}>Semua buyer</option>`+buyerNames.map(n=>`<option value="${escAttr(n)}" ${pembelianBuyer===n?'selected':''}>${esc(n)}</option>`).join('');
   const buyerMatch=b=> pembelianBuyer==='all' || buyerOf(b)===pembelianBuyer;
-  const forPO=base.filter(b=>b.jenis==='pemenuhan_po' && buyerMatch(b)).sort((a,b)=>byOrderNo(a.order_no,b.order_no)||byOrderNo(a.no_tagihan,b.no_tagihan));
+  const orderNos=[...new Set(base.filter(b=>b.jenis==='pemenuhan_po').map(b=>b.order_no).filter(Boolean))].sort(byOrderNo);
+  const oOpts=`<option value="all" ${pembelianOrder==='all'?'selected':''}>Semua order</option>`+orderNos.map(n=>`<option value="${escAttr(n)}" ${pembelianOrder===n?'selected':''}>${esc(n)}</option>`).join('');
+  const orderMatch=b=> pembelianOrder==='all' || b.order_no===pembelianOrder;
+  const forPO=base.filter(b=>b.jenis==='pemenuhan_po' && buyerMatch(b) && orderMatch(b)).sort((a,b)=>byOrderNo(a.order_no,b.order_no)||byOrderNo(a.no_tagihan,b.no_tagihan));
   const umum=(pembelianBuyer==='all'?base.filter(b=>b.jenis!=='pemenuhan_po'):[]).sort((a,b)=>byOrderNo(a.no_tagihan,b.no_tagihan));
   const totPO=forPO.reduce((s,b)=>s+(Number(b.nilai)||0),0);
   const totUmum=umum.reduce((s,b)=>s+(Number(b.nilai)||0),0);
@@ -1595,8 +1605,8 @@ function viewPembelian(){
     <td style="text-align:right;white-space:nowrap">${actBtns(b)}</td>
   </tr>`).join('');
   return `<div class="o-wrap">
-    <div class="o-head"><h2 class="o-title">Pembelian</h2><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${monthSelectHTML()}<select class="o-input" onchange="setPembelianBuyer(this.value)" style="width:auto;padding:8px 10px">${bOpts}</select><button class="o-btn" id="pbNew">+ Pembelian</button></div></div>
-    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Periode: <b>${periodeLabel()}</b>${pembelianBuyer==='all'?'':' · Buyer: <b>'+esc(pembelianBuyer)+'</b>'}. Dikelompokkan: untuk memenuhi order buyer (masuk HPP) vs pembelian umum (RnB/operasional → biaya usaha).</p>
+    <div class="o-head"><h2 class="o-title">Pembelian</h2><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${monthSelectHTML()}<select class="o-input" onchange="setPembelianBuyer(this.value)" style="width:auto;padding:8px 10px">${bOpts}</select><select class="o-input" onchange="setPembelianOrder(this.value)" style="width:auto;padding:8px 10px">${oOpts}</select><button class="o-btn" id="pbNew">+ Pembelian</button></div></div>
+    <p style="color:var(--ink-soft);font-size:12.5px;margin:0 0 12px">Periode: <b>${periodeLabel()}</b>${pembelianBuyer==='all'?'':' · Buyer: <b>'+esc(pembelianBuyer)+'</b>'}${pembelianOrder==='all'?'':' · Order: <b>'+esc(pembelianOrder)+'</b>'}. Dikelompokkan: untuk memenuhi order buyer (masuk HPP) vs pembelian umum (RnB/operasional → biaya usaha).</p>
     <p style="margin:0 0 8px;font-weight:600;color:var(--ink)">Pembelian untuk order buyer (HPP)</p>
     <div class="o-card" style="padding:0;overflow:hidden">
       <table class="o-table">
@@ -2244,7 +2254,8 @@ function viewKasModule(){
     const keluar=t.arah==='keluar'?(Number(t.jumlah)||0):0;
     masukT+=masuk; keluarT+=keluar;
     const ket=txKet(t);
-    const editable=canWr && !t._ro && ['biaya_usaha','modal','lain'].includes(t.jenis); // hanya transaksi manual (bukan setoran modal dari menu Modal)
+    const editable=canWr && !t._ro && ['biaya_usaha','modal','lain'].includes(t.jenis); // Edit form hanya utk transaksi manual
+    const deletable=canWr && !t._ro; // semua transaksi nyata bisa DIHAPUS (utk beresin yang nyangkut, mis. bayar supplier)
     return `<tr>
       <td style="white-space:nowrap">${t.tanggal?fmtLong(t.tanggal):'-'}</td>
       <td>${esc(ket)}</td>
@@ -2252,7 +2263,7 @@ function viewKasModule(){
       <td style="text-align:right;color:#1D6B4F">${masuk?rp(masuk):''}</td>
       <td style="text-align:right;color:var(--danger)">${keluar?rp(keluar):''}</td>
       <td style="text-align:right;font-weight:600;color:var(--ink-soft)" title="Saldo bank setelah transaksi ini (semua order)">${rp(saldoById[t.id])}</td>
-      ${canWr?`<td style="text-align:right;white-space:nowrap">${editable?`<button class="o-btn ghost" data-editkas="${t.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delkas="${t.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:''}</td>`:''}
+      ${canWr?`<td style="text-align:right;white-space:nowrap">${editable?`<button class="o-btn ghost" data-editkas="${t.id}" style="padding:4px 9px">Edit</button> `:''}${deletable?`<button class="o-btn ghost" data-delkas="${t.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:''}</td>`:''}
     </tr>`;
   }).join('');
   const stat=(l,v,c)=>`<div class="o-stat"><div class="l">${l}</div><div class="v" style="${c?`color:${c}`:''}">${rp(v)}</div></div>`;
@@ -2349,7 +2360,7 @@ async function saveKas(){
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan transaksi'; return; }
   ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; kasForm=false; kasEditId=null; render();
 }
-async function delKas(id){ if(!confirm('Hapus transaksi kas ini?')) return; await sb.from('transactions').delete().eq('id',id); ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render(); }
+async function delKas(id){ if(!confirm('Hapus transaksi kas ini?')) return; const r=await deleteTxSafe(id); if(r&&r.error){ alert('Gagal hapus: '+r.error+'\n(Pastikan login owner/keuangan.)'); return; } ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; billsCache=null; render(); }
 // Hapus 1 transaksi dengan aman: ikut hapus pembayaran tagihan yang menaut + segarkan status tagihan/PO.
 async function deleteTxSafe(id){
   const { data:bp }=await sb.from('bill_payments').select('id,bill_id').eq('transaction_id',id);
@@ -2805,8 +2816,9 @@ async function loadFinReport(){
   const omonth={}; ords.forEach(o=>{ omonth[o.id]=(o.tanggal_order||'').slice(0,7); });
   const nb=vs.filter(o=>o.status!=='batal' && (!ym||omonth[o.id]===ym));
   const penjualanGross=nb.reduce((s,o)=>s+n(o.nilai_jual),0);
-  const ppn=Math.round(penjualanGross*11/111);
-  const penjualanNetto=penjualanGross-ppn;
+  // netto dibulatkan per-order (sama dengan menu HPP & rincian per order) supaya angka Laporan cocok
+  const penjualanNetto=nb.reduce((s,o)=>s+(n(o.nilai_jual)-Math.round(n(o.nilai_jual)*11/111)),0);
+  const ppn=penjualanGross-penjualanNetto;
   // PPN masukan (kredit) per order dari tagihan pemenuhan PO ber-PPN → raw material dihitung NETTO.
   const inVatByOrd={}; bills.forEach(b=>{ if(b.jenis==='pemenuhan_po'&&b.order_id) inVatByOrd[b.order_id]=(inVatByOrd[b.order_id]||0)+billInputVat(b); });
   const hppRaw=nb.reduce((s,o)=>s+ (n(o.hpp)-(inVatByOrd[o.id]||0)),0); // raw material netto (tanpa PPN masukan)
@@ -2840,9 +2852,59 @@ async function loadFinReport(){
 }
 function resetFinReport(){ finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; }
 function viewLaporan(){
-  if(finReport===null){ loadFinReport(); return `<div class="o-wrap"><div class="o-card">Memuat laporan…</div></div>`; }
+  if(finReport===null || hppCache===null || ledgerCache===null || billsCache===null || ordersCache===null){
+    if(finReport===null) loadFinReport();
+    if(hppCache===null) loadHpp();
+    if(ledgerCache===null) loadLedger();
+    if(billsCache===null && !billLoading) loadBills();
+    if(ordersCache===null && !orderLoading) loadOrders();
+    return `<div class="o-wrap"><div class="o-card">Memuat laporan…</div></div>`;
+  }
   const f=finReport;
   const stat=(l,v,c)=>`<div class="o-stat"><div class="l">${l}</div><div class="v" style="${c?`color:${c}`:''}">${rp(v)}</div></div>`;
+  // Rincian per ORDER & per BUYER (semua order, dihitung sama persis dengan menu HPP → gampang dicek-silang)
+  const _opsMap=opsPoByOrder(), _inVat=inputVatByOrder();
+  const _buyerOf={}; (ordersCache||[]).forEach(o=>_buyerOf[o.id]=o.buyer_name);
+  const _paidSup={}; (billsCache||[]).forEach(b=>{ if(b.jenis==='pemenuhan_po'&&b.order_id) _paidSup[b.order_id]=(_paidSup[b.order_id]||0)+(Number(b.paid)||0); });
+  const perOrder=(hppCache||[]).slice().sort((a,b)=>byOrderNo(a.no_order,b.no_order)).map(o=>{
+    const njNetto=(Number(o.nilai_jual)||0)-Math.round((Number(o.nilai_jual)||0)*11/111);
+    const rawNetto=(Number(o.hpp)||0)-(Number(_inVat[o.id])||0);
+    const hppM=rawNetto+(Number(_opsMap[o.id])||0);
+    return {no:o.no_order, buyer:_buyerOf[o.id]||'—', nj:njNetto, hpp:hppM, laba:njNetto-hppM, bayarBuyer:Number(o.masuk_buyer)||0, piutang:Number(o.piutang)||0, bayarSup:Number(_paidSup[o.id])||0};
+  });
+  const pbMap={}; perOrder.forEach(r=>{ const g=pbMap[r.buyer]||(pbMap[r.buyer]={buyer:r.buyer,nj:0,hpp:0,laba:0,bayarBuyer:0,piutang:0,bayarSup:0}); g.nj+=r.nj; g.hpp+=r.hpp; g.laba+=r.laba; g.bayarBuyer+=r.bayarBuyer; g.piutang+=r.piutang; g.bayarSup+=r.bayarSup; });
+  const perBuyer=Object.values(pbMap).sort((a,b)=>String(a.buyer).localeCompare(String(b.buyer)));
+  const tot=perOrder.reduce((s,r)=>({nj:s.nj+r.nj,hpp:s.hpp+r.hpp,laba:s.laba+r.laba,bayarBuyer:s.bayarBuyer+r.bayarBuyer,piutang:s.piutang+r.piutang,bayarSup:s.bayarSup+r.bayarSup}),{nj:0,hpp:0,laba:0,bayarBuyer:0,piutang:0,bayarSup:0});
+  const perOrderRows=perOrder.map(r=>`<tr>
+    <td style="font-weight:600;color:var(--tea-dark);white-space:nowrap">${esc(r.no)}</td><td style="white-space:nowrap">${esc(r.buyer)}</td>
+    <td style="text-align:right">${rp(r.nj)}</td><td style="text-align:right">${rp(r.hpp)}</td>
+    <td style="text-align:right;font-weight:600;color:${r.laba>=0?'#1D6B4F':'var(--danger)'}">${rp(r.laba)}</td>
+    <td style="text-align:right">${rp(r.bayarSup)}</td><td style="text-align:right">${rp(r.bayarBuyer)}</td>
+    <td style="text-align:right;color:${r.piutang>0?'var(--danger)':'var(--ink-soft)'}">${rp(r.piutang)}</td></tr>`).join('');
+  const perBuyerRows=perBuyer.map(r=>`<tr>
+    <td style="font-weight:600;white-space:nowrap">${esc(r.buyer)}</td>
+    <td style="text-align:right">${rp(r.nj)}</td><td style="text-align:right">${rp(r.hpp)}</td>
+    <td style="text-align:right;font-weight:600;color:${r.laba>=0?'#1D6B4F':'var(--danger)'}">${rp(r.laba)}</td>
+    <td style="text-align:right">${rp(r.bayarSup)}</td><td style="text-align:right">${rp(r.bayarBuyer)}</td>
+    <td style="text-align:right;color:${r.piutang>0?'var(--danger)':'var(--ink-soft)'}">${rp(r.piutang)}</td></tr>`).join('');
+  const FOOT='background:#F1F5F2;font-weight:700';
+  const rincianSection=`
+    <h3 style="font-size:15px;color:var(--tea-dark);margin:22px 0 4px">Rincian per Order</h3>
+    <p style="color:var(--ink-soft);font-size:12px;margin:0 0 8px">Semua order (netto, tanpa PPN) — angka ini sama persis dengan menu <b>HPP</b>. "Bayar supplier" = yang sudah dibayar ke supplier (Arus Kas) untuk order itu.</p>
+    <div class="o-card" style="padding:0;overflow:auto;margin-bottom:16px">
+      <table class="o-table">
+        <thead><tr><th>Order</th><th>Buyer</th><th style="text-align:right">Nilai jual</th><th style="text-align:right">HPP</th><th style="text-align:right">Laba</th><th style="text-align:right">Bayar supplier</th><th style="text-align:right">Dibayar buyer</th><th style="text-align:right">Piutang</th></tr></thead>
+        <tbody>${perOrderRows||`<tr><td colspan="8" class="o-empty">Belum ada order.</td></tr>`}</tbody>
+        <tfoot><tr style="${FOOT}"><td colspan="2" style="padding:10px 14px">TOTAL</td><td style="text-align:right;padding:10px 14px">${rp(tot.nj)}</td><td style="text-align:right;padding:10px 14px">${rp(tot.hpp)}</td><td style="text-align:right;padding:10px 14px">${rp(tot.laba)}</td><td style="text-align:right;padding:10px 14px">${rp(tot.bayarSup)}</td><td style="text-align:right;padding:10px 14px">${rp(tot.bayarBuyer)}</td><td style="text-align:right;padding:10px 14px">${rp(tot.piutang)}</td></tr></tfoot>
+      </table>
+    </div>
+    <h3 style="font-size:15px;color:var(--tea-dark);margin:6px 0 4px">Rincian per Buyer</h3>
+    <div class="o-card" style="padding:0;overflow:auto">
+      <table class="o-table">
+        <thead><tr><th>Buyer</th><th style="text-align:right">Nilai jual</th><th style="text-align:right">HPP</th><th style="text-align:right">Laba</th><th style="text-align:right">Bayar supplier</th><th style="text-align:right">Dibayar buyer</th><th style="text-align:right">Piutang</th></tr></thead>
+        <tbody>${perBuyerRows||`<tr><td colspan="7" class="o-empty">Belum ada.</td></tr>`}</tbody>
+      </table>
+    </div>`;
   const monthOpts=`<option value="all" ${finMonth==='all'?'selected':''}>Semua bulan</option>`+ID_MONTHS_2026.map((m,i)=>{ const val='2026-'+String(i+1).padStart(2,'0'); return `<option value="${val}" ${finMonth===val?'selected':''}>${m}</option>`; }).join('');
   const periodeLbl = finMonth==='all' ? 'Semua bulan' : (ID_MONTHS_2026[parseInt(finMonth.slice(5,7),10)-1]||finMonth);
   return `<div class="o-wrap">
@@ -2883,6 +2945,7 @@ function viewLaporan(){
         <p style="font-size:11px;color:var(--ink-soft);margin:8px 0 0">Idealnya <b>Total Aset = Total Kewajiban + Modal</b> (neraca seimbang).</p>
       </div>
     </div>
+    ${rincianSection}
   </div>`;
 }
 function bindLaporan(){
@@ -3638,6 +3701,7 @@ function viewPembayaranModule(){
   const rows=sortedBills.map(b=>{
     const sisa=Number(b.sisa)||0;
     const paying=payingBillId===b.id;
+    const lastPay=(b.payments||[]).slice().sort((x,y)=>String(x.tanggal||'').localeCompare(String(y.tanggal||''))).pop();
     const payForm=paying?`<tr><td colspan="7" style="background:#FBF8EF">
       <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:6px 0">
         <div><label class="o-field" style="margin:0 0 4px">Jumlah bayar</label><input class="o-input" id="payJumlah" type="number" value="${Math.round(sisa)}" style="width:150px"></div>
@@ -3646,30 +3710,27 @@ function viewPembayaranModule(){
         <button class="o-btn ghost" id="payCancel">Batal</button>
       </div><div id="payErr" style="color:var(--danger);font-size:12px"></div>
     </td></tr>`:'';
-    // Riwayat pembayaran tagihan ini — bisa ubah tanggal / hapus (untuk koreksi tanggal bayar supplier di Arus Kas)
-    const payHist=(b.payments||[]).map(p=> editPayId===p.id
-      ? `<tr><td colspan="7" style="background:#FBF8EF">
-          <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:6px 0">
-            <div><label class="o-field" style="margin:0 0 4px">Ubah tanggal bayar</label><input class="o-input" id="epTgl" type="date" value="${p.tanggal||''}" style="width:150px"></div>
-            <button class="o-btn" data-savepaydate="${p.id}">Simpan</button>
-            <button class="o-btn ghost" id="epCancel">Batal</button>
-          </div>
-        </td></tr>`
-      : `<tr style="background:#FCFBF7">
-          <td></td>
-          <td colspan="4" style="color:var(--ink-soft);font-size:12px">↳ dibayar ${p.tanggal?fmtLong(p.tanggal):'-'}</td>
-          <td style="text-align:right;font-size:12px;color:var(--ink-soft)">${rp(p.jumlah)}</td>
-          <td style="text-align:right;white-space:nowrap">${canWr?`<button class="o-btn ghost" data-editpaydate="${p.id}" style="padding:3px 8px">Ubah tgl</button> <button class="o-btn ghost" data-delpay="${p.id}" data-tx="${p.transaction_id||''}" data-bill="${b.id}" style="padding:3px 8px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:''}</td>
-        </tr>`).join('');
+    const editingPay = lastPay && editPayId===lastPay.id;
+    const editForm=editingPay?`<tr><td colspan="7" style="background:#FBF8EF">
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;padding:6px 0">
+        <div><label class="o-field" style="margin:0 0 4px">Ubah tanggal bayar</label><input class="o-input" id="epTgl" type="date" value="${lastPay.tanggal||''}" style="width:150px"></div>
+        <button class="o-btn" data-savepaydate="${lastPay.id}">Simpan</button>
+        <button class="o-btn ghost" id="epCancel">Batal</button>
+      </div>
+    </td></tr>`:'';
+    // Kolom aksi (1 baris): belum lunas → Bayar; sudah dibayar → status + Ubah tgl/Hapus pembayaran terakhir.
+    const aksi = sisa>0
+      ? `<button class="o-btn ghost" data-pay="${b.id}" style="padding:4px 11px">Bayar</button>`
+      : `${billStatusBadge(b)}${(canWr&&lastPay)?` <button class="o-btn ghost" data-editpaydate="${lastPay.id}" style="padding:3px 8px">Ubah tgl</button> <button class="o-btn ghost" data-delpay="${lastPay.id}" data-tx="${lastPay.transaction_id||''}" data-bill="${b.id}" style="padding:3px 8px;color:var(--danger);border-color:#E3B9B3">Hapus</button>`:''}`;
     return `<tr>
-      <td style="font-weight:600;color:var(--tea-dark)">${esc(b.no_tagihan||'-')}</td>
-      <td>${esc(b.supplier_name)}</td>
-      <td>${esc(b.order_no)}</td>
-      <td style="text-align:right">${rp(b.nilai)}</td>
-      <td style="text-align:right">${rp(b.paid)}</td>
-      <td style="text-align:right">${rp(sisa)}</td>
-      <td style="text-align:right">${sisa>0.001?`<button class="o-btn ghost" data-pay="${b.id}" style="padding:4px 11px">Bayar</button>`:billStatusBadge(b)}</td>
-    </tr>${payForm}${payHist}`;
+      <td style="font-weight:600;color:var(--tea-dark);white-space:nowrap">${esc(b.no_tagihan||'-')}</td>
+      <td style="white-space:nowrap">${esc(b.supplier_name)}</td>
+      <td style="white-space:nowrap">${esc(b.order_no)}</td>
+      <td style="text-align:right;white-space:nowrap">${rp(b.nilai)}</td>
+      <td style="text-align:right;white-space:nowrap">${rp(b.paid)}${lastPay&&lastPay.tanggal?` <span style="color:var(--ink-soft);font-size:11px">· ${fmtLong(lastPay.tanggal)}</span>`:''}</td>
+      <td style="text-align:right;white-space:nowrap">${rp(sisa)}</td>
+      <td style="text-align:right;white-space:nowrap">${aksi}</td>
+    </tr>${payForm}${editForm}`;
   }).join('');
   const total=billsCache.reduce((s,b)=>s+Math.max(0,Number(b.sisa)||0),0);
   return `<div class="o-wrap">
@@ -3683,7 +3744,7 @@ function viewPembayaranModule(){
         <tbody>${rows||`<tr><td colspan="7" class="o-empty">Belum ada tagihan.</td></tr>`}</tbody>
       </table>
     </div>
-    <p style="color:var(--ink-soft);font-size:12px;margin-top:10px">Yang sudah lunas tetap tampil. Membayar otomatis tercatat sebagai kas keluar di Arus kas. Tiap pembayaran (baris "↳ dibayar …") bisa <b>Ubah tgl</b> (kalau tanggal bayarnya salah) atau <b>Hapus</b> — perubahan ikut ke Arus Kas.</p>
+    <p style="color:var(--ink-soft);font-size:12px;margin-top:10px">Kolom <b>Dibayar</b> menampilkan jumlah + tanggal bayar. Membayar otomatis tercatat sebagai kas keluar di Arus kas. Untuk yang sudah dibayar bisa <b>Ubah tgl</b> (kalau tanggal salah) atau <b>Hapus</b> — perubahan ikut ke Arus Kas.</p>
   </div>`;
 }
 function bindPembayaran(){
@@ -4218,7 +4279,21 @@ function render(){
   if(activeTab==='biaya'){ c.innerHTML=viewBiayaModule(); return; }
   if(activeTab==='profit'){ c.innerHTML=viewHppModule(); return; }
   if(activeTab==='ppn'){ c.innerHTML=viewPpnModule(); bindPpnModule(); return; }
-  if(activeTab==='penjualan'){ if(ordersCache===null && !orderLoading) loadOrders(); c.innerHTML=viewPenjualan(); bindEvents(); renderOverlay(); return; }
+  if(activeTab==='penjualan'){
+    if(!penjualanShown){
+      c.innerHTML=`<div class="o-wrap"><div class="o-card" style="text-align:center;padding:40px 20px">
+        <p style="margin:0 0 14px;color:var(--ink-soft)">Data Penjualan disembunyikan.</p>
+        <button class="o-btn" id="penjShow">👁 Tampilkan Penjualan</button>
+      </div></div>`;
+      const sb2=document.getElementById('penjShow'); if(sb2) sb2.onclick=()=>{ penjualanShown=true; render(); };
+      return;
+    }
+    if(ordersCache===null && !orderLoading) loadOrders();
+    c.innerHTML=`<div style="display:flex;justify-content:flex-end;margin-bottom:8px"><button class="o-btn ghost" id="penjHide">🙈 Sembunyikan</button></div>`+viewPenjualan();
+    bindEvents(); renderOverlay();
+    const hb=document.getElementById('penjHide'); if(hb) hb.onclick=()=>{ penjualanShown=false; render(); };
+    return;
+  }
   if(activeTab==='report'){ c.innerHTML=viewLaporan(); bindLaporan(); return; }
   if(activeTab==='doc_jual'){ c.innerHTML=viewPenjualanLink(); bindPenjualanLink(); return; }
   if(!views[activeTab]){ c.innerHTML=viewPlaceholder(activeTab); return; }
@@ -4319,14 +4394,15 @@ async function loadDashboard(){
     const pb=perBuyer[bn]||(perBuyer[bn]={penjualan:0,dibayar:0,piutang:0,hpp:0});
     pb.penjualan+=nj; pb.dibayar+=by; pb.piutang+=pi; pb.hpp+=h;
   });
-  let masuk=0,keluar=0,biaya=0,lainMasuk=0;
+  let masuk=0,keluar=0,biaya=0,lainMasuk=0,sampleGratis=0;
   tx.filter(t=>inMo(t.tanggal)).forEach(t=>{ const j=Number(t.jumlah)||0;
     if(t.arah==='masuk')masuk+=j; else if(t.arah==='keluar')keluar+=j;
     if(t.jenis==='biaya_usaha') biaya+=j;
-    if(t.arah==='masuk' && t.jenis==='lain') lainMasuk+=j;   // pendapatan sample/lain
+    if(t.jenis==='biaya_usaha' && /sample/i.test(t.kategori||'')) sampleGratis+=j;   // sample gratis = biaya marketing
+    if(t.arah==='masuk' && t.jenis==='lain') lainMasuk+=j;   // pendapatan lain-lain
   });
   const ppn=Math.round(penjualan*11/111);
-  dashData={penjualan,piutang,hpp,laba,biaya,lainMasuk,saldoKas:masuk-keluar,ppn,labaBersih:(penjualan-ppn)-hpp-biaya+lainMasuk,jumlahOrder,perBuyer,perMonth,periode:ym};
+  dashData={penjualan,piutang,hpp,laba,biaya,lainMasuk,sampleGratis,saldoKas:masuk-keluar,ppn,labaBersih:(penjualan-ppn)-hpp-biaya+lainMasuk,jumlahOrder,perBuyer,perMonth,periode:ym};
   render();
 }
 function ymLabel(ym){ const m=parseInt(ym.slice(5,7),10); return (EN_MONTHS[m-1]||ym).slice(0,3); }
@@ -4394,7 +4470,7 @@ function viewRingkasan(){
     ${kpi('Penjualan bersih (DPP)', d.penjualan-d.ppn, 'g', 'trending-up')}
     ${kpi('HPP', d.hpp, 'red', 'flask')}
     ${kpi('Laba kotor', (d.penjualan-d.ppn)-d.hpp, 'teal', 'chart-bar', true)}
-    ${kpi('Pendapatan sample', d.lainMasuk||0, 'g', 'flask')}
+    ${kpi('Sample gratis (marketing)', d.sampleGratis||0, 'gold', 'flask')}
     ${kpi('Profit', d.labaBersih, 'teal', 'chart-line', true)}
     ${kpi('Margin rata-rata', ((d.penjualan-d.ppn)>0?Math.round(((d.penjualan-d.ppn-d.hpp)/(d.penjualan-d.ppn))*100):0), 'teal', 'chart-line', false, false, true)}
     ${kpi('Piutang', d.piutang, 'red', 'coin')}
