@@ -1658,7 +1658,7 @@ function bindPembelian(){
 // ===== Modal: setoran modal + investor & bagi hasil =====
 let investorsCache=null, modalSetoranCache=null, bagiHasilCache=null, orderLabaCache=null;
 let modalForm=null; // null | 'setoran' | 'investor' | 'bagi'
-let editSetoranId=null, editInvestorId=null;
+let editSetoranId=null, editInvestorId=null, editBagiId=null;
 async function loadModal(){
   try{
     const [inv,set,bh]=await Promise.all([
@@ -1702,7 +1702,7 @@ async function loadOrderLabaNetto(){
 function investorTipeLabel(t){ return t==='pemilik'?'Pemilik':(t==='tetap'?'Investor tetap':'Sesekali'); }
 function invName(id){ const i=(investorsCache||[]).find(x=>x.id===id); return i?i.nama:'—'; }
 function viewModalModule(){
-  if(investorsCache===null){ loadModal(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
+  if(investorsCache===null || finReport===null){ if(investorsCache===null) loadModal(); if(finReport===null) loadFinReport(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
   if(modalForm==='setoran') return viewSetoranForm();
   if(modalForm==='investor') return viewInvestorForm();
   if(modalForm==='bagi') return viewBagiForm();
@@ -1715,7 +1715,7 @@ function viewModalModule(){
   const totalBagiHasil=bh.reduce((s,x)=>s+(Number(x.jumlah)||0),0);
   const hutangBagiHasil=bh.filter(x=>!x.transaction_id).reduce((s,x)=>s+(Number(x.jumlah)||0),0); // belum dibayar
   const dibayarBagiHasil=totalBagiHasil-hutangBagiHasil;
-  const labaTotal = orderFinance ? Number(orderFinance.laba)||0 : null;
+  const labaTotal = finReport ? Number(finReport.labaBersih)||0 : null; // laba bersih usaha (netto, setelah biaya) — sama dgn Laporan
   const labaOwner = (labaTotal!=null?labaTotal:0) - totalBagiHasil;
   const posisiModal = totalSetoran + labaOwner;
   // Section 1: setoran
@@ -1735,18 +1735,23 @@ function viewModalModule(){
     <td style="text-align:right">${rp(dibagikanBy[i.id]||0)}</td>
     ${actBtns('editinv','delinv',i.id)}
   </tr>`).join('');
-  // Section 2b: bagi hasil entries
-  const bhRows=bh.map(x=>{
+  // Section 2b: bagi hasil entries — selalu urut berdasarkan order
+  const bhRows=bh.slice().sort((a,b)=>byOrderNo(a.order_no,b.order_no)).map(x=>{
     const paid=!!x.transaction_id;
+    const invx=(investorsCache||[]).find(i=>i.id===x.investor_id);
+    const ket=invx?investorTipeLabel(invx.tipe):'—';
     const statusCell=`<td>${paid?'<span style="color:#1D6B4F;font-weight:600">Dibayar ✓</span>':'<span style="color:var(--danger)">Belum</span>'}</td>`;
-    const act=canWr?`<td style="text-align:right;white-space:nowrap">${paid?`<button class="o-btn ghost" data-batalbagi="${x.id}" style="padding:4px 9px">Batal bayar</button>`:`<button class="o-btn" data-bayarbagi="${x.id}" style="padding:4px 9px">Tandai dibayar</button>`} <button class="o-btn ghost" data-delbagi="${x.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>`:'';
+    const payCell=canWr?`<td style="white-space:nowrap">${paid?`<button class="o-btn ghost" data-batalbagi="${x.id}" style="padding:2px 6px;font-size:11px">Batal</button>`:`<button class="o-btn" data-bayarbagi="${x.id}" style="padding:2px 6px;font-size:11px">Tandai dibayar</button>`}</td>`:'';
+    const act=canWr?`<td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-editbagi="${x.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delbagi="${x.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>`:'';
     return `<tr>
-    <td>${esc(x.investor_nama||invName(x.investor_id))}</td>
+    <td style="font-weight:600;color:var(--tea-dark)">${esc(x.investor_nama||invName(x.investor_id))}</td>
+    <td style="white-space:nowrap">${x.tanggal?(x.tanggal.slice(8,10)+'/'+x.tanggal.slice(5,7)+'/'+x.tanggal.slice(2,4)):'-'}</td>
     <td>${esc(x.order_no||'-')}</td>
-    <td style="color:var(--ink-soft);font-size:12px">${esc(x.dasar||'')}${x.catatan?` · ${esc(x.catatan)}`:''}</td>
-    <td>${x.tanggal?fmtLong(x.tanggal):'-'}</td>
+    <td style="color:var(--ink-soft);font-size:12px">${esc(x.dasar||'')}</td>
     <td style="text-align:right">${rp(x.jumlah)}</td>
     ${statusCell}
+    ${payCell}
+    <td style="color:var(--ink-soft);font-size:12px">${ket}</td>
     ${act}
   </tr>`;
   }).join('');
@@ -1764,18 +1769,12 @@ function viewModalModule(){
     </div>
     <button class="o-btn ghost" id="mdAddSetoran" style="margin-top:8px">+ Tambah setoran</button>
 
-    <p style="margin:20px 0 8px;font-weight:600;color:var(--ink)">2 · Investor &amp; Bagi Hasil</p>
-    <div class="o-card" style="padding:0;overflow:hidden">
-      <table class="o-table">
-        <thead><tr><th>Investor</th><th>Tipe</th><th style="text-align:right">Porsi</th><th style="text-align:right">Sudah dibagikan</th>${delHead}</tr></thead>
-        <tbody>${invRows||`<tr><td colspan="${canWr?5:4}" class="o-empty">Belum ada investor.</td></tr>`}</tbody>
-      </table>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:8px"><button class="o-btn ghost" id="mdAddInvestor">+ Investor</button><button class="o-btn ghost" id="mdAddBagi">+ Catat bagi hasil</button></div>
+    <p style="margin:20px 0 8px;font-weight:600;color:var(--ink)">2 · Bagi Hasil Investor</p>
+    <div style="display:flex;gap:8px;margin-bottom:10px"><button class="o-btn ghost" id="mdAddInvestor">+ Investor</button><button class="o-btn ghost" id="mdAddBagi">+ Catat bagi hasil</button></div>
     <div class="o-card" style="padding:0;overflow:hidden;margin-top:10px">
       <table class="o-table">
-        <thead><tr><th>Investor</th><th>Order/PO</th><th>Dasar</th><th>Tanggal</th><th style="text-align:right">Jumlah</th><th>Status</th>${delHead}</tr></thead>
-        <tbody>${bhRows||`<tr><td colspan="${canWr?7:6}" class="o-empty">Belum ada bagi hasil dicatat.</td></tr>`}</tbody>
+        <thead><tr><th>Investor</th><th>Tanggal masuk</th><th>Order/PO</th><th>Dasar</th><th style="text-align:right">Jumlah</th><th>Status</th>${canWr?'<th>Tandai bayar</th>':''}<th>Keterangan</th>${delHead}</tr></thead>
+        <tbody>${bhRows||`<tr><td colspan="${canWr?9:7}" class="o-empty">Belum ada bagi hasil dicatat.</td></tr>`}</tbody>
       </table>
       <div style="padding:10px 14px;text-align:right;border-top:1px solid var(--paper-line)">Total dibagikan ke investor: <b>${rp(totalBagiHasil)}</b>${hutangBagiHasil>0?` <span style="color:var(--ink-soft);font-size:12px">(dibayar ${rp(dibayarBagiHasil)} · belum ${rp(hutangBagiHasil)})</span>`:''}</div>
     </div>
@@ -1784,7 +1783,7 @@ function viewModalModule(){
     <div class="o-card">
       <table class="o-kv">
         ${kv('Total setoran modal', totalSetoran)}
-        ${kv('Laba usaha (dari order)', labaTotal!=null?labaTotal:0)}
+        ${kv('Laba bersih usaha', labaTotal!=null?labaTotal:0)}
         ${kv('− Bagi hasil investor', totalBagiHasil, 'var(--danger)')}
         ${hutangBagiHasil>0?`<tr><td style="padding-left:16px;color:var(--ink-soft);font-size:12px">• Belum dibayar (Hutang bagi hasil)</td><td style="text-align:right;color:var(--danger);font-size:12px">${rp(hutangBagiHasil)}</td></tr>`:''}
         ${kv('Laba ditahan (bagian owner)', labaOwner, '#1D6B4F')}
@@ -1876,27 +1875,28 @@ async function saveInvestor(){
 }
 // ---- Form: Catat bagi hasil ----
 function viewBagiForm(){
-  const iopts=(investorsCache||[]).map(i=>`<option value="${i.id}" data-persen="${i.persen!=null?i.persen:''}" data-tipe="${i.tipe}">${esc(i.nama)} · ${investorTipeLabel(i.tipe)}${(i.persen!=null&&i.persen!=='')?` (${esc(i.persen)}%)`:''}</option>`).join('');
-  const oopts=(ordersCache||[]).map(o=>`<option value="${o.id}" data-no="${escAttr(o.no_order)}">${esc(o.no_order)} · ${esc(o.buyer_name)}</option>`).join('');
+  const e=editBagiId?(bagiHasilCache||[]).find(x=>x.id===editBagiId):null;
+  const iopts=(investorsCache||[]).map(i=>`<option value="${i.id}" data-persen="${i.persen!=null?i.persen:''}" data-tipe="${i.tipe}" ${e&&e.investor_id===i.id?'selected':''}>${esc(i.nama)} · ${investorTipeLabel(i.tipe)}${(i.persen!=null&&i.persen!=='')?` (${esc(i.persen)}%)`:''}</option>`).join('');
+  const oopts=(ordersCache||[]).map(o=>`<option value="${o.id}" data-no="${escAttr(o.no_order)}" ${e&&e.order_id===o.id?'selected':''}>${esc(o.no_order)} · ${esc(o.buyer_name)}</option>`).join('');
   return `<div class="o-wrap" style="max-width:520px">
-    <div class="o-head"><h2 class="o-title">Catat bagi hasil</h2></div>
+    <div class="o-head"><h2 class="o-title">${e?'Edit bagi hasil':'Catat bagi hasil'}</h2></div>
     <div class="o-card">
       <label class="o-field" style="margin-top:0">Investor</label>
       <select class="o-input" id="bgInvestor"><option value="">— pilih —</option>${iopts}</select>
       <label class="o-field">Order / PO (opsional)</label>
-      <select class="o-input" id="bgOrder"><option value="">— umum / tanpa order —</option>${oopts}</select>
+      <select class="o-input" id="bgOrder"><option value="" ${e&&!e.order_id?'selected':''}>— umum / tanpa order —</option>${oopts}</select>
       <div id="bgLabaInfo" style="color:var(--ink-soft);font-size:12px;margin:6px 0 0;min-height:15px"></div>
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
-        <div><label class="o-field">Dasar perhitungan</label><input class="o-input" id="bgDasar" placeholder="mis. 10% laba Mei / Special PO-1"></div>
-        <div><label class="o-field">Tanggal</label><input class="o-input" id="bgTgl" type="date" value="${today()}"></div>
+        <div><label class="o-field">Dasar perhitungan</label><input class="o-input" id="bgDasar" placeholder="mis. 10% laba Mei / Special PO-1" value="${e?escAttr(e.dasar||''):''}"></div>
+        <div><label class="o-field">Tanggal</label><input class="o-input" id="bgTgl" type="date" value="${e&&e.tanggal?e.tanggal:today()}"></div>
       </div>
       <label class="o-field">Jumlah (Rp)</label>
-      <input class="o-input" id="bgJumlah" type="number" inputmode="numeric" placeholder="isi manual atau otomatis dari % laba">
+      <input class="o-input" id="bgJumlah" type="number" inputmode="numeric" placeholder="isi manual atau otomatis dari % laba" value="${e?(Number(e.jumlah)||''):''}">
       <label class="o-field">Catatan</label>
-      <input class="o-input" id="bgCatatan" placeholder="opsional">
+      <input class="o-input" id="bgCatatan" placeholder="opsional" value="${e?escAttr(e.catatan||''):''}">
       <div id="bgErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:8px"></div>
       <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="o-btn" id="bgSave">Simpan bagi hasil</button>
+        <button class="o-btn" id="bgSave">${e?'Simpan perubahan':'Simpan bagi hasil'}</button>
         <button class="o-btn ghost" id="bgCancel">Batal</button>
       </div>
     </div>
@@ -1931,9 +1931,12 @@ async function saveBagi(){
   if(!iid){ if(err) err.textContent='Pilih investor.'; return; }
   if(jumlah<=0){ if(err) err.textContent='Jumlah harus lebih dari 0.'; return; }
   const btn=document.getElementById('bgSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('bagi_hasil').insert({ investor_id:iid, order_id:oid, order_no:oid?ono:null, dasar, tanggal:tgl, jumlah, catatan:cat });
-  if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan bagi hasil'; return; }
-  investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; modalForm=null; render();
+  const payload={ investor_id:iid, order_id:oid, order_no:oid?ono:null, dasar, tanggal:tgl, jumlah, catatan:cat };
+  const { error }= editBagiId
+    ? await sb.from('bagi_hasil').update(payload).eq('id',editBagiId)
+    : await sb.from('bagi_hasil').insert(payload);
+  if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan'; return; }
+  investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null; modalForm=null; editBagiId=null; render();
 }
 async function delSetoran(id){ if(!confirm('Hapus setoran modal ini?')) return; await sb.from('modal_setoran').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null; render(); }
 async function delInvestor(id){ if(!confirm('Hapus investor ini? Setoran & bagi hasil yang sudah dicatat tetap tersimpan (tanpa tautan investor).')) return; await sb.from('investors').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render(); }
@@ -1973,12 +1976,12 @@ function bindModalModule(){
     const bo=document.getElementById('bgOrder'); if(bo) bo.onchange=bagiRecalc;
     const bj=document.getElementById('bgJumlah'); if(bj) bj.oninput=()=>{ bj.dataset.auto='0'; };
     document.getElementById('bgSave').onclick=saveBagi;
-    document.getElementById('bgCancel').onclick=()=>{ modalForm=null; render(); };
+    document.getElementById('bgCancel').onclick=()=>{ modalForm=null; editBagiId=null; render(); };
     return;
   }
   const a=document.getElementById('mdAddSetoran'); if(a) a.onclick=()=>{ editSetoranId=null; modalForm='setoran'; render(); };
   const b=document.getElementById('mdAddInvestor'); if(b) b.onclick=()=>{ editInvestorId=null; modalForm='investor'; render(); };
-  const d=document.getElementById('mdAddBagi'); if(d) d.onclick=()=>{ modalForm='bagi'; render(); };
+  const d=document.getElementById('mdAddBagi'); if(d) d.onclick=()=>{ editBagiId=null; modalForm='bagi'; render(); };
   document.querySelectorAll('[data-editset]').forEach(el=>el.onclick=()=>{ editSetoranId=el.dataset.editset; modalForm='setoran'; render(); });
   document.querySelectorAll('[data-editinv]').forEach(el=>el.onclick=()=>{ editInvestorId=el.dataset.editinv; modalForm='investor'; render(); });
   document.querySelectorAll('[data-delset]').forEach(el=>el.onclick=()=>delSetoran(el.dataset.delset));
@@ -1986,6 +1989,7 @@ function bindModalModule(){
   document.querySelectorAll('[data-delbagi]').forEach(el=>el.onclick=()=>delBagi(el.dataset.delbagi));
   document.querySelectorAll('[data-bayarbagi]').forEach(el=>el.onclick=()=>bayarBagi(el.dataset.bayarbagi));
   document.querySelectorAll('[data-batalbagi]').forEach(el=>el.onclick=()=>batalBayarBagi(el.dataset.batalbagi));
+  document.querySelectorAll('[data-editbagi]').forEach(el=>el.onclick=()=>{ editBagiId=el.dataset.editbagi; modalForm='bagi'; render(); });
 }
 
 // ===== Aset: aset tetap + ringkasan aset lancar =====
