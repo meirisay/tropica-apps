@@ -1703,7 +1703,7 @@ function investorTipeLabel(t){ return t==='pemilik'?'Pemilik':(t==='tetap'?'Inve
 function invName(id){ const i=(investorsCache||[]).find(x=>x.id===id); return i?i.nama:'—'; }
 function viewModalModule(){
   if(investorsCache===null || finReport===null){ if(investorsCache===null) loadModal(); if(finReport===null) loadFinReport(); return `<div class="o-wrap"><div class="o-card">Memuat…</div></div>`; }
-  if(modalForm==='setoran') return viewSetoranForm();
+  if(modalForm==='setoran'||modalForm==='tarik') return viewSetoranForm();
   if(modalForm==='investor') return viewInvestorForm();
   if(modalForm==='bagi') return viewBagiForm();
   const canWr=canSeeCost();
@@ -1711,7 +1711,9 @@ function viewModalModule(){
   const actBtns=(editAttr,delAttr,id)=>canWr?`<td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-${editAttr}="${id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-${delAttr}="${id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>`:'';
   const delHead=canWr?'<th></th>':'';
   const inv=investorsCache, setoran=modalSetoranCache, bh=bagiHasilCache;
-  const totalSetoran=setoran.reduce((s,x)=>s+(Number(x.jumlah)||0),0);
+  const totalSetoran=setoran.reduce((s,x)=>s+(Number(x.jumlah)||0),0); // bersih (setor − tarik)
+  const totalSetor=setoran.reduce((s,x)=>s+Math.max(0,Number(x.jumlah)||0),0);
+  const totalTarik=setoran.reduce((s,x)=>s+Math.max(0,-(Number(x.jumlah)||0)),0);
   const totalBagiHasil=bh.reduce((s,x)=>s+(Number(x.jumlah)||0),0);
   const hutangBagiHasil=bh.filter(x=>!x.transaction_id).reduce((s,x)=>s+(Number(x.jumlah)||0),0); // belum dibayar
   const dibayarBagiHasil=totalBagiHasil-hutangBagiHasil;
@@ -1719,13 +1721,13 @@ function viewModalModule(){
   const labaOwner = (labaTotal!=null?labaTotal:0) - totalBagiHasil;
   const posisiModal = totalSetoran + labaOwner;
   // Section 1: setoran
-  const setoranRows=setoran.map(x=>`<tr>
-    <td style="font-weight:600;color:var(--tea-dark)">${esc(x.nama||invName(x.investor_id))}</td>
-    <td>${x.tanggal?fmtLong(x.tanggal):'-'}</td>
+  const setoranRows=setoran.slice().sort((a,b)=>String(a.tanggal||'').localeCompare(String(b.tanggal||''))).map(x=>{ const neg=Number(x.jumlah)<0; return `<tr>
+    <td style="font-weight:600;color:var(--tea-dark)">${esc(x.nama||invName(x.investor_id))}${neg?' <span style="color:var(--danger);font-weight:400;font-size:11px">(tarik)</span>':''}</td>
+    <td style="white-space:nowrap">${x.tanggal?fmtLong(x.tanggal):'-'}</td>
     <td style="color:var(--ink-soft);font-size:12px">${esc(x.catatan||'')}</td>
-    <td style="text-align:right">${rp(x.jumlah)}</td>
+    <td style="text-align:right${neg?';color:var(--danger)':''}">${rp(x.jumlah)}</td>
     ${actBtns('editset','delset',x.id)}
-  </tr>`).join('');
+  </tr>`;}).join('');
   // Section 2a: investor list with computed total dibagikan
   const dibagikanBy={}; bh.forEach(x=>{ dibagikanBy[x.investor_id]=(dibagikanBy[x.investor_id]||0)+(Number(x.jumlah)||0); });
   const invRows=inv.map(i=>`<tr>
@@ -1765,9 +1767,9 @@ function viewModalModule(){
         <thead><tr><th>Nama</th><th>Tanggal</th><th>Catatan</th><th style="text-align:right">Jumlah</th>${delHead}</tr></thead>
         <tbody>${setoranRows||`<tr><td colspan="${canWr?5:4}" class="o-empty">Belum ada setoran modal.</td></tr>`}</tbody>
       </table>
-      <div style="padding:10px 14px;text-align:right;border-top:1px solid var(--paper-line)">Total modal disetor: <b>${rp(totalSetoran)}</b></div>
+      <div style="padding:10px 14px;text-align:right;border-top:1px solid var(--paper-line)">Modal bersih: <b>${rp(totalSetoran)}</b>${totalTarik>0?` <span style="color:var(--ink-soft);font-size:12px">(setor ${rp(totalSetor)} − tarik ${rp(totalTarik)})</span>`:''}</div>
     </div>
-    <button class="o-btn ghost" id="mdAddSetoran" style="margin-top:8px">+ Tambah setoran</button>
+    <div style="display:flex;gap:8px;margin-top:8px"><button class="o-btn ghost" id="mdAddSetoran">+ Tambah setoran</button><button class="o-btn ghost" id="mdTarik">− Tarik/Kembalikan modal</button></div>
 
     <p style="margin:20px 0 8px;font-weight:600;color:var(--ink)">2 · Bagi Hasil Investor</p>
     <div style="display:flex;gap:8px;margin-bottom:10px"><button class="o-btn ghost" id="mdAddInvestor">+ Investor</button><button class="o-btn ghost" id="mdAddBagi">+ Catat bagi hasil</button></div>
@@ -1796,22 +1798,24 @@ function viewModalModule(){
 // ---- Form: Tambah setoran modal ----
 function viewSetoranForm(){
   const e=editSetoranId?(modalSetoranCache||[]).find(x=>x.id===editSetoranId):null;
+  const isTarik=(modalForm==='tarik')||(e&&Number(e.jumlah)<0);
   const iopts=(investorsCache||[]).map(i=>`<option value="${i.id}" ${e&&e.investor_id===i.id?'selected':''}>${esc(i.nama)} · ${investorTipeLabel(i.tipe)}</option>`).join('');
   return `<div class="o-wrap" style="max-width:480px">
-    <div class="o-head"><h2 class="o-title">${e?'Edit setoran modal':'Tambah setoran modal'}</h2></div>
+    <div class="o-head"><h2 class="o-title">${isTarik?'Tarik / Kembalikan modal':(e?'Edit setoran modal':'Tambah setoran modal')}</h2></div>
     <div class="o-card">
-      <label class="o-field" style="margin-top:0">Penyetor (pemilik / investor)</label>
+      ${isTarik?`<p style="margin:0 0 10px;color:var(--ink-soft);font-size:12px">Mengurangi modal orang ini &amp; membuat uang keluar di Arus Kas. Tidak memengaruhi laba.</p>`:''}
+      <label class="o-field" style="margin-top:0">${isTarik?'Modal siapa yang ditarik':'Penyetor (pemilik / investor)'}</label>
       <select class="o-input" id="msInvestor"><option value="">— pilih —</option>${iopts}</select>
       ${(investorsCache||[]).length?'':`<p style="color:var(--ink-soft);font-size:12px;margin:6px 0 0">Belum ada investor. Tambahkan dulu lewat "+ Investor" di bagian 2.</p>`}
       <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
         <div><label class="o-field">Tanggal</label><input class="o-input" id="msTgl" type="date" value="${e&&e.tanggal?e.tanggal:today()}"></div>
-        <div><label class="o-field">Jumlah (Rp)</label><input class="o-input" id="msJumlah" type="number" inputmode="numeric" placeholder="mis. 25000000" value="${e?Number(e.jumlah)||'':''}"></div>
+        <div><label class="o-field">${isTarik?'Jumlah ditarik (Rp)':'Jumlah (Rp)'}</label><input class="o-input" id="msJumlah" type="number" inputmode="numeric" placeholder="mis. 20000000" value="${e?Math.abs(Number(e.jumlah))||'':''}"></div>
       </div>
       <label class="o-field">Catatan</label>
       <input class="o-input" id="msCatatan" placeholder="opsional" value="${e?escAttr(e.catatan||''):''}">
       <div id="msErr" style="color:var(--danger);font-size:12.5px;min-height:16px;margin-top:8px"></div>
       <div style="display:flex;gap:8px;margin-top:6px">
-        <button class="o-btn" id="msSave">${e?'Simpan perubahan':'Simpan setoran'}</button>
+        <button class="o-btn" id="msSave">${isTarik?'Simpan penarikan':(e?'Simpan perubahan':'Simpan setoran')}</button>
         <button class="o-btn ghost" id="msCancel">Batal</button>
       </div>
     </div>
@@ -1823,11 +1827,14 @@ async function saveSetoran(){
   const jumlah=Number(document.getElementById('msJumlah').value)||0;
   const tgl=document.getElementById('msTgl').value||today();
   const cat=document.getElementById('msCatatan').value.trim();
-  if(!iid){ if(err) err.textContent='Pilih penyetor.'; return; }
+  if(!iid){ if(err) err.textContent='Pilih pemilik/investor.'; return; }
   if(jumlah<=0){ if(err) err.textContent='Jumlah harus lebih dari 0.'; return; }
   const inv=(investorsCache||[]).find(x=>x.id===iid);
+  const existing=editSetoranId?(modalSetoranCache||[]).find(x=>x.id===editSetoranId):null;
+  const isTarik=(modalForm==='tarik')||(existing&&Number(existing.jumlah)<0);
+  const jumlahSigned=isTarik?-Math.abs(jumlah):Math.abs(jumlah); // penarikan disimpan sbg modal negatif
   const btn=document.getElementById('msSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const payload={ investor_id:iid, nama:inv?inv.nama:null, tanggal:tgl, jumlah, catatan:cat };
+  const payload={ investor_id:iid, nama:inv?inv.nama:null, tanggal:tgl, jumlah:jumlahSigned, catatan:cat };
   const { error }= editSetoranId
     ? await sb.from('modal_setoran').update(payload).eq('id',editSetoranId)
     : await sb.from('modal_setoran').insert(payload);
@@ -1969,7 +1976,7 @@ async function batalBayarBagi(id){
   investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null; render();
 }
 function bindModalModule(){
-  if(modalForm==='setoran'){ document.getElementById('msSave').onclick=saveSetoran; document.getElementById('msCancel').onclick=()=>{ modalForm=null; editSetoranId=null; render(); }; return; }
+  if(modalForm==='setoran'||modalForm==='tarik'){ document.getElementById('msSave').onclick=saveSetoran; document.getElementById('msCancel').onclick=()=>{ modalForm=null; editSetoranId=null; render(); }; return; }
   if(modalForm==='investor'){ document.getElementById('ivSave').onclick=saveInvestor; document.getElementById('ivCancel').onclick=()=>{ modalForm=null; editInvestorId=null; render(); }; return; }
   if(modalForm==='bagi'){
     const bi=document.getElementById('bgInvestor'); if(bi) bi.onchange=bagiRecalc;
@@ -1980,6 +1987,7 @@ function bindModalModule(){
     return;
   }
   const a=document.getElementById('mdAddSetoran'); if(a) a.onclick=()=>{ editSetoranId=null; modalForm='setoran'; render(); };
+  const tk=document.getElementById('mdTarik'); if(tk) tk.onclick=()=>{ editSetoranId=null; modalForm='tarik'; render(); };
   const b=document.getElementById('mdAddInvestor'); if(b) b.onclick=()=>{ editInvestorId=null; modalForm='investor'; render(); };
   const d=document.getElementById('mdAddBagi'); if(d) d.onclick=()=>{ editBagiId=null; modalForm='bagi'; render(); };
   document.querySelectorAll('[data-editset]').forEach(el=>el.onclick=()=>{ editSetoranId=el.dataset.editset; modalForm='setoran'; render(); });
@@ -2280,9 +2288,9 @@ async function loadLedger(){
     // sehingga saldo awal dimulai dari modal. (Sumber tunggal: tabel modal_setoran; tak bisa diedit dari sini.)
     try{
       const { data:ms }=await sb.from('modal_setoran').select('id,tanggal,jumlah,nama,catatan');
-      (ms||[]).forEach(m=>rows.push({ id:'modal_'+m.id, tanggal:m.tanggal, arah:'masuk', jenis:'modal', jumlah:m.jumlah,
-        kategori:'Setoran modal', catatan:(m.nama?('Modal '+m.nama):'Setoran modal')+(m.catatan?(' · '+m.catatan):''),
-        order_id:null, order_no:null, _ro:true }));
+      (ms||[]).forEach(m=>{ const neg=Number(m.jumlah)<0; rows.push({ id:'modal_'+m.id, tanggal:m.tanggal, arah:neg?'keluar':'masuk', jenis:'modal', jumlah:Math.abs(Number(m.jumlah)||0),
+        kategori:neg?'Penarikan modal':'Setoran modal', catatan:(neg?('Tarik modal '+(m.nama||'')):(m.nama?('Modal '+m.nama):'Setoran modal'))+(m.catatan?(' · '+m.catatan):''),
+        order_id:null, order_no:null, _ro:true }); });
     }catch(e){}
     ledgerCache=rows;
   }catch(e){ ledgerCache=ledgerCache||[]; }
