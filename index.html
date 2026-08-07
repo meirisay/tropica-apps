@@ -832,6 +832,8 @@ function byOrderNo(a,b){ return String(a==null?'':a).localeCompare(String(b==nul
 function isOngkir(it){ return ((it.satuan||'').toLowerCase()==='ongkir') || ((it.nama||'').toLowerCase()==='ongkir'); }
 function itemsTotal(items){ return (items||[]).filter(it=>!isOngkir(it)).reduce((s,it)=>s+(Number(it.qty)||0)*(Number(it.harga)||0),0); }
 function ongkirTotal(items){ return (items||[]).filter(isOngkir).reduce((s,it)=>s+((Number(it.qty)||1)*(Number(it.harga)||0)),0); }
+// Nilai jual NETTO (tanpa PPN keluaran). Ongkir TIDAK kena PPN → dikecualikan dari dasar PPN.
+function njNettoCalc(nilaiJual, ongkir){ const g=Number(nilaiJual)||0; return g-Math.round((g-(Number(ongkir)||0))*11/111); }
 function computeItemTotals(items){ const dpp=itemsTotal(items); const ppn=Math.round(dpp*0.11); const ongkir=ongkirTotal(items); return {dpp, ppn, ongkir, total:dpp+ppn+ongkir}; }
 function itemSummary(items){ return (items||[]).map(i=>i.nama).filter(Boolean).join(', '); }
 const ITEM_GRID='1fr 52px 74px 98px 26px';
@@ -1675,10 +1677,27 @@ async function loadModal(){
       const bmap={}; (buyersCache||[]).forEach(b=>bmap[b.id]=b.nama);
       ordersCache=(os||[]).map(o=>({...o, buyer_name:bmap[o.buyer_id]||'—'}));
     }
-    const { data:vs }=await sb.from('v_order_summary').select('id,laba');
-    const m={}; (vs||[]).forEach(v=>{ m[v.id]=Number(v.laba)||0; }); orderLabaCache=m;
+    await loadOrderLabaNetto(); // laba NETTO per order (konsisten dgn menu HPP) untuk usulan bagi hasil
   }catch(e){ orderLabaCache=orderLabaCache||{}; }
   render();
+}
+// Laba NETTO per order untuk usulan bagi hasil — dihitung SAMA PERSIS dgn menu HPP:
+//   laba = (nilai jual − PPN keluaran) − ( (raw material − PPN masukan) + OPS pemenuhan PO )
+// PPN masukan = kredit (billInputVat), OPS PO = biaya_usaha berkategori HPP yang ditandai order.
+async function loadOrderLabaNetto(){
+  try{
+    const [vsR, billsR, txR, ordR] = await Promise.all([
+      sb.from('v_order_summary').select('id,nilai_jual,hpp'),
+      sb.from('supplier_bills').select('order_id,jenis,pakai_ppn,nilai,items'),
+      sb.from('transactions').select('order_id,arah,jenis,kategori,jumlah'),
+      sb.from('orders').select('id,items')
+    ]);
+    const ongkirM={}; (ordR.data||[]).forEach(o=>{ ongkirM[o.id]=ongkirTotal(o.items); });
+    const inVat={}; (billsR.data||[]).forEach(b=>{ if(b.order_id) inVat[b.order_id]=(inVat[b.order_id]||0)+billInputVat(b); });
+    const ops={}; (txR.data||[]).forEach(t=>{ if(t.arah==='keluar'&&t.jenis==='biaya_usaha'&&t.order_id&&HPP_KATEGORI.includes(t.kategori)) ops[t.order_id]=(ops[t.order_id]||0)+(Number(t.jumlah)||0); });
+    const m={}; (vsR.data||[]).forEach(o=>{ const njNetto=njNettoCalc(o.nilai_jual, ongkirM[o.id]); const rawNetto=(Number(o.hpp)||0)-(inVat[o.id]||0); m[o.id]=njNetto-(rawNetto+(ops[o.id]||0)); });
+    orderLabaCache=m;
+  }catch(e){ orderLabaCache=orderLabaCache||{}; }
 }
 function investorTipeLabel(t){ return t==='pemilik'?'Pemilik':(t==='tetap'?'Investor tetap':'Sesekali'); }
 function invName(id){ const i=(investorsCache||[]).find(x=>x.id===id); return i?i.nama:'—'; }
@@ -2231,7 +2250,7 @@ async function loadHpp(){
   try{
     const [vs,ors,pos]=await Promise.all([
       getVS(),
-      sb.from('orders').select('id,tanggal_order'),
+      sb.from('orders').select('id,tanggal_order,items'),
       sb.from('purchase_orders').select('order_id,jatuh_tempo,deadline_kirim')
     ]);
     const omap={}; (ors.data||[]).forEach(o=>omap[o.id]=o);
@@ -2240,6 +2259,7 @@ async function loadHpp(){
       if(p.deadline_kirim && (!e.deadline_kirim||p.deadline_kirim<e.deadline_kirim)) e.deadline_kirim=p.deadline_kirim; });
     hppCache=(vs||[]).filter(o=>o.status!=='batal').map(o=>({ ...o,
       tglOrder:(omap[o.id]||{}).tanggal_order||null,
+      ongkir:ongkirTotal((omap[o.id]||{}).items),
       jatuhTempo:(pmap[o.id]||{}).jatuh_tempo||null,
       deadlineKirim:(pmap[o.id]||{}).deadline_kirim||null }));
   }catch(e){ hppCache=hppCache||[]; }
@@ -2552,7 +2572,7 @@ function viewHppModule(){
   let nj=0,raw=0,ops=0,hpp=0,laba=0;
   const rows=hppCache.slice().sort((a,b)=>byOrderNo(a.no_order,b.no_order)).map(o=>{
     const njGross=Number(o.nilai_jual)||0;
-    const njNetto=njGross-Math.round(njGross*11/111);      // nilai jual tanpa PPN keluaran
+    const njNetto=njNettoCalc(njGross, o.ongkir);          // nilai jual tanpa PPN keluaran (ongkir bebas PPN)
     const rawNetto=(Number(o.hpp)||0)-(Number(inVatMap[o.id])||0); // raw material tanpa PPN masukan (kredit)
     const opsM=Number(opsMap[o.id])||0;                     // OPS pemenuhan PO (gaji/delivery ditandai order)
     const hppM=rawNetto+opsM;                                // HPP (tanpa PPN) = raw netto + ops PO
@@ -2839,16 +2859,17 @@ async function loadFinReport(){
     sel('bill_payments','bill_id,jumlah'),
     sel('modal_setoran','jumlah,tanggal'),
     sel('bagi_hasil','jumlah,tanggal'),
-    sel('orders','id,tanggal_order')
+    sel('orders','id,tanggal_order,items')
   ]);
   const n=x=>Number(x)||0;
   const ym = finMonth==='all'?null:finMonth;
   const m=d=> !ym || String(d||'').slice(0,7)===ym;      // cocok bulan
   const omonth={}; ords.forEach(o=>{ omonth[o.id]=(o.tanggal_order||'').slice(0,7); });
+  const oOngkir={}; ords.forEach(o=>{ oOngkir[o.id]=ongkirTotal(o.items); });
   const nb=vs.filter(o=>o.status!=='batal' && (!ym||omonth[o.id]===ym));
   const penjualanGross=nb.reduce((s,o)=>s+n(o.nilai_jual),0);
-  // netto dibulatkan per-order (sama dengan menu HPP & rincian per order) supaya angka Laporan cocok
-  const penjualanNetto=nb.reduce((s,o)=>s+(n(o.nilai_jual)-Math.round(n(o.nilai_jual)*11/111)),0);
+  // netto dibulatkan per-order (sama dengan menu HPP & rincian per order) supaya angka Laporan cocok; ongkir bebas PPN
+  const penjualanNetto=nb.reduce((s,o)=>s+njNettoCalc(o.nilai_jual, oOngkir[o.id]),0);
   const ppn=penjualanGross-penjualanNetto;
   // PPN masukan (kredit) per order dari tagihan pemenuhan PO ber-PPN → raw material dihitung NETTO.
   const inVatByOrd={}; bills.forEach(b=>{ if(b.jenis==='pemenuhan_po'&&b.order_id) inVatByOrd[b.order_id]=(inVatByOrd[b.order_id]||0)+billInputVat(b); });
@@ -2901,7 +2922,7 @@ function viewLaporan(){
   const _buyerOf={}; (ordersCache||[]).forEach(o=>_buyerOf[o.id]=o.buyer_name);
   const _paidSup={}; (billsCache||[]).forEach(b=>{ if(b.jenis==='pemenuhan_po'&&b.order_id) _paidSup[b.order_id]=(_paidSup[b.order_id]||0)+(Number(b.paid)||0); });
   const perOrder=(hppCache||[]).slice().sort((a,b)=>byOrderNo(a.no_order,b.no_order)).map(o=>{
-    const njNetto=(Number(o.nilai_jual)||0)-Math.round((Number(o.nilai_jual)||0)*11/111);
+    const njNetto=njNettoCalc(o.nilai_jual, o.ongkir);
     const rawNetto=(Number(o.hpp)||0)-(Number(_inVat[o.id])||0);
     const hppM=rawNetto+(Number(_opsMap[o.id])||0);
     return {no:o.no_order, buyer:_buyerOf[o.id]||'—', nj:njNetto, hpp:hppM, laba:njNetto-hppM, bayarBuyer:Number(o.masuk_buyer)||0, piutang:Number(o.piutang)||0, bayarSup:Number(_paidSup[o.id])||0};

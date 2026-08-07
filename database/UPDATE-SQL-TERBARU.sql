@@ -157,4 +157,8 @@ alter table public.orders add column if not exists tanggal_serah_terima date;
 -- [18] Aset tetap: simpan id transaksi kas keluar terkait (biar bisa dihapus bersih)
 alter table public.aset_tetap add column if not exists transaction_id uuid;
 
+-- [19] Bagi hasil investor: simpan id transaksi kas keluar saat dibayar (fitur "Tandai dibayar").
+--      Kolom ini BELUM dipakai sampai fitur "Tandai dibayar" dibangun; aman ditambahkan lebih dulu.
+alter table public.bagi_hasil add column if not exists transaction_id uuid;
+
 -- Selesai. Setelah muncul "Success", buka aplikasi dan uji coba.
