@@ -1668,6 +1668,9 @@ async function loadModal(){
     ]);
     investorsCache=inv.data||[]; modalSetoranCache=set.data||[];
     bagiHasilCache=(bh.data||[]).map(x=>({...x, investor_nama:x.investors?x.investors.nama:'—'}));
+    // tanggal bayar (dari transaksi kas terkait) untuk yang sudah ditandai dibayar
+    const _txIds=bagiHasilCache.map(x=>x.transaction_id).filter(Boolean);
+    if(_txIds.length){ const { data:_txs }=await sb.from('transactions').select('id,tanggal').in('id',_txIds); const _tm={}; (_txs||[]).forEach(t=>_tm[t.id]=t.tanggal); bagiHasilCache.forEach(x=>{ if(x.transaction_id) x.bayar_tanggal=_tm[x.transaction_id]; }); }
   }catch(e){ investorsCache=investorsCache||[]; modalSetoranCache=modalSetoranCache||[]; bagiHasilCache=bagiHasilCache||[]; }
   // orders + laba per order (untuk form Catat bagi hasil)
   try{
@@ -1721,10 +1724,11 @@ function viewModalModule(){
   const labaOwner = (labaTotal!=null?labaTotal:0) - totalBagiHasil;
   const posisiModal = totalSetoran + labaOwner;
   // Section 1: setoran
-  const setoranRows=setoran.slice().sort((a,b)=>String(a.tanggal||'').localeCompare(String(b.tanggal||''))).map(x=>{ const neg=Number(x.jumlah)<0; return `<tr>
-    <td style="font-weight:600;color:var(--tea-dark)">${esc(x.nama||invName(x.investor_id))}${neg?' <span style="color:var(--danger);font-weight:400;font-size:11px">(tarik)</span>':''}</td>
-    <td style="white-space:nowrap">${x.tanggal?fmtLong(x.tanggal):'-'}</td>
-    <td style="color:var(--ink-soft);font-size:12px">${esc(x.catatan||'')}</td>
+  const setoranRows=setoran.slice().sort((a,b)=>String(a.tanggal||'').localeCompare(String(b.tanggal||''))).map(x=>{ const neg=Number(x.jumlah)<0; const tg=x.tanggal?fmtLong(x.tanggal):'-'; return `<tr>
+    <td style="font-weight:600;color:var(--tea-dark)">${esc(x.nama||invName(x.investor_id))}</td>
+    <td style="white-space:nowrap">${neg?'-':tg}</td>
+    <td style="white-space:nowrap;color:var(--danger)">${neg?tg:'-'}</td>
+    <td style="color:var(--ink-soft);font-size:12px">${neg?`Penarikan modal${x.catatan?' · '+esc(x.catatan):''}`:esc(x.catatan||'')}</td>
     <td style="text-align:right${neg?';color:var(--danger)':''}">${rp(x.jumlah)}</td>
     ${actBtns('editset','delset',x.id)}
   </tr>`;}).join('');
@@ -1742,7 +1746,8 @@ function viewModalModule(){
     const paid=!!x.transaction_id;
     const invx=(investorsCache||[]).find(i=>i.id===x.investor_id);
     const ket=invx?investorTipeLabel(invx.tipe):'—';
-    const statusCell=`<td>${paid?'<span style="color:#1D6B4F;font-weight:600">Dibayar ✓</span>':'<span style="color:var(--danger)">Belum</span>'}</td>`;
+    const bd=x.bayar_tanggal?(x.bayar_tanggal.slice(8,10)+'/'+x.bayar_tanggal.slice(5,7)+'/'+x.bayar_tanggal.slice(2,4)):'';
+    const statusCell=`<td style="white-space:nowrap">${paid?'<span style="color:#1D6B4F;font-weight:600">Dibayar ✓</span>'+(bd?`<br><span style="color:var(--ink-soft);font-size:11px">${bd}</span>`:''):'<span style="color:var(--danger)">Belum</span>'}</td>`;
     const payCell=canWr?`<td style="white-space:nowrap">${paid?`<button class="o-btn ghost" data-batalbagi="${x.id}" style="padding:2px 6px;font-size:11px">Batal</button>`:`<button class="o-btn" data-bayarbagi="${x.id}" style="padding:2px 6px;font-size:11px">Tandai dibayar</button>`}</td>`:'';
     const act=canWr?`<td style="text-align:right;white-space:nowrap"><button class="o-btn ghost" data-editbagi="${x.id}" style="padding:4px 9px">Edit</button> <button class="o-btn ghost" data-delbagi="${x.id}" style="padding:4px 9px;color:var(--danger);border-color:#E3B9B3">Hapus</button></td>`:'';
     return `<tr>
@@ -1764,8 +1769,8 @@ function viewModalModule(){
     <p style="margin:0 0 8px;font-weight:600;color:var(--ink)">1 · Setoran Modal <span style="font-weight:400;color:var(--ink-soft);font-size:12px">(uang pemilik &amp; investor)</span></p>
     <div class="o-card" style="padding:0;overflow:hidden">
       <table class="o-table">
-        <thead><tr><th>Nama</th><th>Tanggal</th><th>Catatan</th><th style="text-align:right">Jumlah</th>${delHead}</tr></thead>
-        <tbody>${setoranRows||`<tr><td colspan="${canWr?5:4}" class="o-empty">Belum ada setoran modal.</td></tr>`}</tbody>
+        <thead><tr><th>Nama</th><th>Tgl masuk</th><th>Tgl ditarik</th><th>Catatan</th><th style="text-align:right">Jumlah</th>${delHead}</tr></thead>
+        <tbody>${setoranRows||`<tr><td colspan="${canWr?6:5}" class="o-empty">Belum ada setoran modal.</td></tr>`}</tbody>
       </table>
       <div style="padding:10px 14px;text-align:right;border-top:1px solid var(--paper-line)">Modal bersih: <b>${rp(totalSetoran)}</b>${totalTarik>0?` <span style="color:var(--ink-soft);font-size:12px">(setor ${rp(totalSetor)} − tarik ${rp(totalTarik)})</span>`:''}</div>
     </div>
