@@ -2,6 +2,10 @@
 
 Aplikasi di-host di **Netlify** sejak 2026-07-14.
 
+> **Update sejak 2026-08-11: auto-deploy dari Git.** Situs tersambung ke GitHub
+> (`meirisay/tropica-apps`) + Netlify CD — **deploy = push ke branch `main`** (lihat
+> [DEPLOY.md](DEPLOY.md)). Drag-drop manual sudah tidak dipakai lagi.
+
 - **URL tim (publik):** https://ornate-eclair-9d0efd.netlify.app
   (disajikan di root sebagai `index.html`)
 - **Dashboard project Netlify:**

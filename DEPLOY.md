@@ -1,37 +1,54 @@
 # Cara Update / Deploy Situs
 
-Situs live disajikan dari `index.html` di Netlify. Untuk menaikkan versi baru:
+Situs live: **https://tropicafarm.netlify.app** — disajikan dari `index.html`.
 
-## Langkah
+## Auto-deploy (cara baru, sejak 2026-08-11)
 
-1. **Siapkan file terbaru sebagai `index.html`.**
-   Salin/rename versi HTML terbaru menjadi `index.html`.
-   `~/Downloads/index.html` sudah disiapkan sebagai salinan siap-deploy.
+Situs **tersambung ke GitHub** (`meirisay/tropica-apps`, remote `origin` via SSH) dengan
+**Netlify Continuous Deployment**. Konfigurasi build ada di [`netlify.toml`](netlify.toml)
+(hanya `index.html` yang dipublikasikan; dokumen `.md` & `database/*.sql` tidak ikut publik).
 
-2. **Buka dashboard project Netlify** (BUKAN app.netlify.com/drop):
-   https://app.netlify.com/projects/ornate-eclair-9d0efd/overview
+> **Deploy = push ke branch `main`.** Tidak perlu drag-drop lagi.
 
-3. **Masuk ke tab `Deploys`.**
+### Langkah
 
-4. **Seret (drag-and-drop)** file `index.html` ke area unggah manual di tab Deploys.
-
-   > ⚠️ Jangan pakai **app.netlify.com/drop** — itu membuat situs baru dengan URL berbeda.
-
-5. **Konfirmasi hasilnya.** Buka URL publik dan pastikan versi terbaru muncul —
-   cari penanda seperti `Desain final v2` atau `FINAL PAYMENT`. Jika masih versi lama,
-   berarti yang ter-deploy salah / masih ter-cache.
-
-## Cek cepat lewat terminal (opsional)
+Pekerjaan aktif ada di branch **`cadangan-17jul`**; **`main`** = branch deploy.
 
 ```bash
-# Harus menampilkan "Desain final v2" jika build final sudah live
-curl -s https://ornate-eclair-9d0efd.netlify.app | grep -o "Desain final v2"
-curl -s https://ornate-eclair-9d0efd.netlify.app | grep -o "FINAL PAYMENT"
+# 1. commit perubahan di cadangan-17jul (lihat juga skill: commit)
+git add index.html && git commit -m "..."   # akhiri dgn Co-Authored-By
+
+# 2. (disarankan) bump penanda versi di index.html — baris login "Versi: Cetak vX.Y ..."
+#    supaya deploy mudah diverifikasi.
+
+# 3. merge ke main + push → memicu auto-deploy
+git checkout main
+git merge cadangan-17jul          # fast-forward
+git push origin main             # ← Netlify otomatis build & deploy (~1–2 menit)
+git checkout cadangan-17jul
+git push origin cadangan-17jul
 ```
 
-## Status per 2026-07-15
+### Verifikasi (build ~1 menit)
 
-Situs live **masih build lama** — dua penanda di atas belum muncul di URL publik,
-padahal `~/Downloads/index.html` lokal sudah versi final. Artinya: **re-deploy masih
-perlu dilakukan** untuk memutakhirkan desain invoice di situs live.
-Lihat [STATUS.md](STATUS.md).
+```bash
+curl -s https://tropicafarm.netlify.app | grep -o "Versi: [^<]*"
+```
+Pastikan menampilkan versi terbaru. Kalau setelah ~3 menit belum berubah, cek
+**Netlify → Deploys** (build gagal/antre?) dan pastikan production branch = `main`.
+
+## Troubleshooting
+
+- **Push minta username/password GitHub:** remote ke-reset ke HTTPS. Kembalikan ke SSH:
+  ```bash
+  git remote set-url origin git@github.com:meirisay/tropica-apps.git
+  ```
+- **Data:** semua data di Supabase — deploy hanya memperbarui `index.html`, tidak menyentuh data.
+- **Repo publik/privat:** file `.md` & `database/*.sql` ada di repo (tidak dipublish ke situs).
+  Set repo **Private** di GitHub bila isinya sensitif.
+
+## Riwayat metode lama (usang)
+
+Dulu deploy manual: drag-drop `index.html` ke Netlify → tab Deploys. **Jangan dipakai lagi** —
+sekarang cukup push ke `main`. (Dan jangan pernah pakai `app.netlify.com/drop` — itu bikin situs
+baru dengan URL berbeda.)
