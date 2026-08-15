@@ -6,10 +6,12 @@ Aplikasi di-host di **Netlify** sejak 2026-07-14.
 > (`meirisay/tropica-apps`) + Netlify CD — **deploy = push ke branch `main`** (lihat
 > [DEPLOY.md](DEPLOY.md)). Drag-drop manual sudah tidak dipakai lagi.
 
-- **URL tim (publik):** https://ornate-eclair-9d0efd.netlify.app
+- **URL tim (publik):** https://tropicafarm.netlify.app
   (disajikan di root sebagai `index.html`)
-- **Dashboard project Netlify:**
-  https://app.netlify.com/projects/ornate-eclair-9d0efd/overview
+  > ⚠️ URL LAMA **https://ornate-eclair-9d0efd.netlify.app sudah MATI (HTTP 404)** per 2026-08-15.
+  > Pastikan SEMUA anggota tim memakai `https://tropicafarm.netlify.app`. Kalau ada yang masih
+  > menyimpan link lama, mereka tidak akan menerima update apa pun.
+- **Dashboard project Netlify:** buka via https://app.netlify.com → project **tropicafarm**.
 
 Backend tetap di Supabase (lihat [DATABASE.md](DATABASE.md)), jadi data tetap
 tersimpan di cloud dan dibagi ke seluruh tim, terlepas dari hosting.
