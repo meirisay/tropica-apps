@@ -8,3 +8,10 @@
 # Deploy produksi mengikuti branch main (diatur juga di dashboard Netlify saat link repo).
 [context.production]
   command = "mkdir -p _site && cp index.html _site/index.html"
+
+# Paksa browser selalu cek versi terbaru (jangan sajikan HTML lama dari cache).
+# Tanpa ini, tim bisa membuka versi lama walau link-nya sama.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
