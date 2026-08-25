@@ -231,9 +231,9 @@
   .inv-brand .txt .a{font-size:10.5px;color:#666;margin-top:3px;}
   .inv-web{font-size:11px;color:#333;text-decoration:underline;align-self:flex-end;}
   .inv-rule{height:4px;background:#E8B923;border-radius:2px;margin:10px 0 0;}
-  .inv-title{text-align:center;font-family:'Fraunces',serif;font-size:30px;font-weight:600;letter-spacing:.06em;margin:20px 0 8px;color:#1f1f1f;}
+  .inv-title{text-align:center;font-family:'Fraunces',serif;font-size:30px;font-weight:600;letter-spacing:.06em;margin:24px 0 16px;color:#1f1f1f;}
   .inv-banner{background:#FBF1CE;color:#B8860B;text-align:center;font-weight:700;font-size:12px;letter-spacing:.05em;padding:7px;border-radius:2px;margin-bottom:16px;}
-  .inv-info{display:flex;justify-content:space-between;gap:30px;margin-bottom:16px;}
+  .inv-info{display:flex;justify-content:space-between;gap:30px;margin-bottom:22px;}
   .inv-info .left{font-size:12px;}
   .inv-info .left .r{display:flex;margin:3px 0;}
   .inv-info .left .r .k{width:110px;font-weight:700;color:#333;}
@@ -289,6 +289,43 @@
   .inv-info.po-info .col .r .k{width:118px;flex:none;font-weight:700;color:#333;}
   .inv-info.po-info .col .r .v{flex:1;min-width:0;}
   .inv-info.po-info .col .r .v.strong{font-weight:700;}
+  /* ── Nota Pengiriman Barang (DO): rapikan spasi & pertegas warna cetak ── */
+  .inv-do .inv-title{margin:34px 0 34px;}          /* jarak judul ↔ Delivery No. lebih lega */
+  .inv-do .inv-info{margin-bottom:32px;}           /* jarak tulisan ↔ tabel lebih lega */
+  .inv-do .inv-brand .txt .a{color:#444;}          /* alamat kop lebih tegas */
+  .inv-do .inv-info .left .r .k{color:#1f1f1f;}    /* label kiri lebih tegas */
+  .inv-do .inv-info .right .k{color:#1f1f1f;}
+  .inv-do .inv-info .right .ad{color:#333;}        /* alamat penerima lebih tegas */
+  /* ===== PI/Invoice Penjualan (.inv-sale): rapikan tampilan & kunci 1 halaman ===== */
+  .inv-sale .inv-info{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px;}
+  .inv-sale .inv-info .left{font-size:10.5px;}
+  .inv-sale .inv-info .left .r .k{width:100px;}
+  .inv-sale .inv-info .right{width:244px;max-width:244px;font-size:10.5px;}          /* BILL TO sejajar di atas kolom Unit Price */
+  .inv-sale .inv-title{margin:10px 0 8px;font-size:24px;}
+  .inv-sale .inv-banner{margin-bottom:8px;padding:4px;font-size:11px;}
+  .inv-sale table.inv-tbl{border-collapse:collapse;font-size:10.5px;}               /* garis kolom tersambung sempurna */
+  .inv-sale table.inv-tbl th{padding:4px 8px;font-size:10px;}
+  .inv-sale table.inv-tbl td{padding:4px 8px;}
+  .inv-sale table.inv-tbl th,.inv-sale table.inv-tbl td{border:1px solid #666;}
+  .inv-sale table.inv-tbl td.c{white-space:nowrap;font-family:'Inter',sans-serif;}  /* Qty 1 baris + font Inter (bukan mono) */
+  .inv-sale table.inv-tbl td.t{font-size:10.5px;}
+  .inv-sale table.inv-tbl td.r .m{font-size:10.5px;}
+  .inv-sale table.inv-tbl tr.grand td{font-size:12px;}
+  .inv-sale .inv-due{margin:8px 0 4px;padding:8px 8px 8px 14px;font-size:11px;}    /* Rp AMOUNT DUE sejajar kolom Total */
+  .inv-sale .inv-due .m .n{min-width:112px;}
+  .inv-sale .inv-breakdown{font-size:9.5px;padding:1px 4px;}
+  .inv-sale .inv-note-line{font-size:9px;padding:2px 4px 6px;}
+  .inv-sale .inv-sec-h{padding:4px 10px;font-size:10.5px;}
+  .inv-sale table.inv-pay{border-collapse:collapse;margin-bottom:6px;font-size:10.5px;}
+  .inv-sale table.inv-pay td{border:1px solid #666;padding:3px 10px;}
+  .inv-sale table.inv-pay td.k{width:170px;}
+  .inv-sale .inv-notes{margin-bottom:4px;}
+  .inv-sale .inv-notes ol{margin-top:3px;font-size:9px;line-height:1.45;}
+  .inv-sale .inv-notes .free{font-size:9px;line-height:1.45;margin-top:5px;}
+  .inv-sale .inv-sign{margin:10px 0 0 auto;width:244px;text-align:center;font-size:10.5px;}   /* tanda tangan sejajar BILL TO, nama center */
+  .inv-sale .inv-sign .city{margin-bottom:5px;}
+  .inv-sale .inv-sign .sp{height:96px;}                            /* ruang tanda tangan + materai */
+  .inv-sale .inv-ttd{display:block;margin:10px auto 26px;max-width:190px;max-height:52px;object-fit:contain;}   /* TTD selalu center/simetris + ruang materai */
   /* Field yang bisa diedit langsung di dokumen sebelum cetak/simpan PDF */
   .ed{outline:none;border-bottom:1px dashed #C9A227;padding:0 1px;cursor:text;transition:background .15s;}
   .ed:hover,.ed:focus{background:#FBF4DC;}
@@ -336,7 +373,9 @@
     #printArea{position:static;width:auto;padding:0;}
     .overlay{position:static;background:#fff;padding:0;overflow:visible;display:block;}
     .doc-wrap{box-shadow:none;max-width:100%;}
-    .inv{padding:12mm !important;}
+    .inv{padding:15mm 12mm 12mm !important;}
+    .inv-do{padding-top:20mm !important;box-sizing:border-box;min-height:260mm;display:flex;flex-direction:column;}   /* kop tidak mepet atas; 260mm = footer terdorong ke bawah tapi TERUJI tetap 1 halaman walau dialog print pakai margin default */
+    .inv-do-foot{margin-top:auto;}          /* Gudang + tanda tangan didorong ke bawah halaman */
     .ed{border-bottom:none !important;background:none !important;}
     .ed-block{border:none !important;background:none !important;padding:0 !important;min-height:0;}
     .inv-notes ol.ed-ol{border:none !important;background:none !important;padding:8px 0 0 20px !important;}
@@ -434,7 +473,7 @@
     <img class="login-logo-img" src="data:image/png;base64,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" alt="Tropica Farm">
     <div class="login-brand">TROPICA FARM</div>
     <h2>Masuk ke Business Suite</h2>
-    <p class="login-sub">Gunakan akun yang diberikan admin.<br><span style="color:var(--gold-deep);font-weight:600;">Versi: v3.7 (13 Agu) — PPN: masukan semua pembelian, status faktur dari No. FP, edit setoran & toleransi</span></p>
+    <p class="login-sub"><span style="color:var(--gold-deep);font-weight:600;">Versi: v4.5</span></p>
     <label for="loginEmail">Email</label>
     <input id="loginEmail" type="email" placeholder="nama@email.com" autocomplete="username">
     <label for="loginPass">Kata sandi</label>
@@ -1754,6 +1793,7 @@ async function loadModal(){
 // Laba NETTO per order untuk usulan bagi hasil — dihitung SAMA PERSIS dgn menu HPP:
 //   laba = (nilai jual − PPN keluaran) − ( (raw material − PPN masukan) + OPS pemenuhan PO )
 // PPN masukan = kredit (billInputVat), OPS PO = biaya_usaha berkategori HPP yang ditandai order.
+// Beban ber-order (PPh final, admin bank, dll) juga dipotong — kebijakan owner: investor ikut menanggung.
 async function loadOrderLabaNetto(){
   try{
     const [vsR, billsR, txR, ordR] = await Promise.all([
@@ -1764,8 +1804,9 @@ async function loadOrderLabaNetto(){
     ]);
     const ongkirM={}; (ordR.data||[]).forEach(o=>{ ongkirM[o.id]=ongkirTotal(o.items); });
     const inVat={}; (billsR.data||[]).forEach(b=>{ if(b.order_id) inVat[b.order_id]=(inVat[b.order_id]||0)+billInputVat(b); });
-    const ops={}; (txR.data||[]).forEach(t=>{ if(t.arah==='keluar'&&t.jenis==='biaya_usaha'&&t.order_id&&HPP_KATEGORI.includes(t.kategori)) ops[t.order_id]=(ops[t.order_id]||0)+(Number(t.jumlah)||0); });
-    const m={}; (vsR.data||[]).forEach(o=>{ const njNetto=njNettoCalc(o.nilai_jual, ongkirM[o.id]); const rawNetto=(Number(o.hpp)||0)-(inVat[o.id]||0); m[o.id]=njNetto-(rawNetto+(ops[o.id]||0)); });
+    // OPS PO (kategori HPP) DAN beban ber-order (mis. PPh final, admin bank) sama-sama mengurangi dasar bagi hasil.
+    const ops={}, beban={}; (txR.data||[]).forEach(t=>{ if(t.arah!=='keluar'||t.jenis!=='biaya_usaha'||!t.order_id) return; const b=HPP_KATEGORI.includes(t.kategori)?ops:beban; b[t.order_id]=(b[t.order_id]||0)+(Number(t.jumlah)||0); });
+    const m={}; (vsR.data||[]).forEach(o=>{ const njNetto=njNettoCalc(o.nilai_jual, ongkirM[o.id]); const rawNetto=(Number(o.hpp)||0)-(inVat[o.id]||0); m[o.id]=njNetto-(rawNetto+(ops[o.id]||0)+(beban[o.id]||0)); });
     orderLabaCache=m;
   }catch(e){ orderLabaCache=orderLabaCache||{}; }
 }
@@ -1893,6 +1934,16 @@ function viewSetoranForm(){
     </div>
   </div>`;
 }
+// ---- Pendanaan (modal & pinjaman) WAJIB punya baris kas ----
+// Pola sama dengan bagi_hasil & aset_tetap: tabel detail menyimpan transaction_id yang menunjuk baris Arus Kas.
+// jenis 'modal'/'pinjaman' sengaja BUKAN 'lain' supaya tidak menambah laba, dan bukan 'biaya_usaha' supaya tidak jadi beban.
+async function syncFinanceTx(txId, data){
+  if(txId){ const { error }=await sb.from('transactions').update(data).eq('id',txId); return error?{error:error.message}:{id:txId}; }
+  const { data:tx, error }=await sb.from('transactions').insert(data).select('id').single();
+  return error?{error:error.message}:{id:tx.id};
+}
+async function dropFinanceTx(txId){ if(!txId) return; try{ await sb.from('transactions').delete().eq('id',txId); }catch(e){} }
+function migrasiPendanaanPesan(msg){ return /transaction_id|tx_bayar_id|tanggal_bayar/i.test(msg||'') ? 'Kolom penghubung belum ada di database — jalankan SQL migrasi pendanaan dulu. Belum ada yang berubah.' : null; }
 async function saveSetoran(){
   const err=document.getElementById('msErr'); if(err) err.textContent='';
   const iid=document.getElementById('msInvestor').value;
@@ -1906,11 +1957,20 @@ async function saveSetoran(){
   const isTarik=(modalForm==='tarik')||(existing&&Number(existing.jumlah)<0);
   const jumlahSigned=isTarik?-Math.abs(jumlah):Math.abs(jumlah); // penarikan disimpan sbg modal negatif
   const btn=document.getElementById('msSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const payload={ investor_id:iid, nama:inv?inv.nama:null, tanggal:tgl, jumlah:jumlahSigned, catatan:cat };
+  // Baris kas dibuat/diperbarui DULU, baru setorannya disimpan — supaya tak pernah ada modal tanpa jejak uang.
+  const txr=await syncFinanceTx(existing?existing.transaction_id:null, {
+    tanggal:tgl, arah:isTarik?'keluar':'masuk', jenis:'modal', jumlah:Math.abs(jumlah),
+    kategori:isTarik?'Penarikan modal':'Setoran modal',
+    catatan:(isTarik?'Tarik modal ':'Modal ')+(inv?inv.nama:'')+(cat?(' \u00b7 '+cat):''), order_id:null });
+  if(txr.error){ if(err) err.textContent='Gagal catat di Arus Kas: '+txr.error; btn.disabled=false; btn.textContent='Simpan setoran'; return; }
+  const payload={ investor_id:iid, nama:inv?inv.nama:null, tanggal:tgl, jumlah:jumlahSigned, catatan:cat, transaction_id:txr.id };
   const { error }= editSetoranId
     ? await sb.from('modal_setoran').update(payload).eq('id',editSetoranId)
     : await sb.from('modal_setoran').insert(payload);
-  if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan setoran'; return; }
+  if(error){
+    if(!(existing&&existing.transaction_id)) await dropFinanceTx(txr.id); // batalkan baris kas yang baru dibuat
+    if(err) err.textContent=migrasiPendanaanPesan(error.message)||('Gagal simpan: '+error.message);
+    btn.disabled=false; btn.textContent='Simpan setoran'; return; }
   investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null; modalForm=null; editSetoranId=null; render();
 }
 // ---- Form: Tambah investor ----
@@ -2017,7 +2077,7 @@ async function saveBagi(){
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan'; return; }
   investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null; modalForm=null; editBagiId=null; render();
 }
-async function delSetoran(id){ if(!confirm('Hapus setoran modal ini?')) return; await sb.from('modal_setoran').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null; render(); }
+async function delSetoran(id){ if(!confirm('Hapus setoran modal ini? Baris uang di Arus Kas ikut terhapus.')) return; const _s=(modalSetoranCache||[]).find(x=>x.id===id); if(_s) await dropFinanceTx(_s.transaction_id); await sb.from('modal_setoran').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null; render(); }
 async function delInvestor(id){ if(!confirm('Hapus investor ini? Setoran & bagi hasil yang sudah dicatat tetap tersimpan (tanpa tautan investor).')) return; await sb.from('investors').delete().eq('id',id); investorsCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render(); }
 async function delBagi(id){ if(!confirm('Hapus catatan bagi hasil ini?')) return;
   const b=(bagiHasilCache||[]).find(x=>x.id===id);
@@ -2301,12 +2361,39 @@ async function savePinjaman(){
   if(!pemberi){ if(err) err.textContent='Isi nama pemberi pinjaman.'; return; }
   if(jumlah<=0){ if(err) err.textContent='Jumlah harus lebih dari 0.'; return; }
   const btn=document.getElementById('pjSave'); btn.disabled=true; btn.textContent='Menyimpan…';
-  const { error }=await sb.from('pinjaman').insert({ pemberi, tanggal:tgl, jumlah, status:'belum', catatan:cat });
-  if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan pinjaman'; return; }
+  // Pinjaman diterima = UANG MASUK → wajib jadi baris Arus Kas.
+  const txr=await syncFinanceTx(null, { tanggal:tgl||today(), arah:'masuk', jenis:'pinjaman', jumlah,
+    kategori:'Pinjaman diterima', catatan:'Pinjaman dari '+pemberi+(cat?(' \u00b7 '+cat):''), order_id:null });
+  if(txr.error){ if(err) err.textContent='Gagal catat di Arus Kas: '+txr.error; btn.disabled=false; btn.textContent='Simpan pinjaman'; return; }
+  const { error }=await sb.from('pinjaman').insert({ pemberi, tanggal:tgl, jumlah, status:'belum', catatan:cat, transaction_id:txr.id });
+  if(error){ await dropFinanceTx(txr.id);
+    if(err) err.textContent=migrasiPendanaanPesan(error.message)||('Gagal simpan: '+error.message);
+    btn.disabled=false; btn.textContent='Simpan pinjaman'; return; }
   pinjamanCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; pinjamanForm=false; render();
 }
-async function togglePinjaman(id, cur){ const ns=cur==='lunas'?'belum':'lunas'; await sb.from('pinjaman').update({status:ns}).eq('id',id); pinjamanCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render(); }
-async function delPinjaman(id){ if(!confirm('Hapus catatan pinjaman ini?')) return; await sb.from('pinjaman').delete().eq('id',id); pinjamanCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; render(); }
+// Tandai lunas = UANG KELUAR → wajib jadi baris Arus Kas (dulu cuma ganti label, kasnya tak pernah tercatat).
+async function togglePinjaman(id, cur){
+  const p=(pinjamanCache||[]).find(x=>x.id===id); if(!p) return;
+  if(cur==='lunas'){
+    if(!confirm('Batalkan pelunasan pinjaman ini? Uang keluar di Arus Kas ikut dihapus.')) return;
+    await dropFinanceTx(p.tx_bayar_id);
+    const { error }=await sb.from('pinjaman').update({status:'belum', tx_bayar_id:null, tanggal_bayar:null}).eq('id',id);
+    if(error){ alert(migrasiPendanaanPesan(error.message)||('Gagal: '+error.message)); return; }
+  } else {
+    const tgl=prompt('Tanggal pelunasan pinjaman '+(p.pemberi||'')+' ('+rp(p.jumlah)+'):', today());
+    if(!tgl) return;
+    const txr=await syncFinanceTx(null, { tanggal:tgl, arah:'keluar', jenis:'pinjaman', jumlah:Number(p.jumlah)||0,
+      kategori:'Pelunasan pinjaman', catatan:'Pelunasan pinjaman '+(p.pemberi||''), order_id:null });
+    if(txr.error){ alert('Gagal catat kas keluar: '+txr.error); return; }
+    const { error }=await sb.from('pinjaman').update({status:'lunas', tx_bayar_id:txr.id, tanggal_bayar:tgl}).eq('id',id);
+    if(error){ await dropFinanceTx(txr.id); alert(migrasiPendanaanPesan(error.message)||('Gagal: '+error.message)); return; }
+  }
+  pinjamanCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null; render();
+}
+async function delPinjaman(id){ if(!confirm('Hapus catatan pinjaman ini? Baris uang di Arus Kas (terima & pelunasan) ikut terhapus.')) return;
+  const p=(pinjamanCache||[]).find(x=>x.id===id);
+  if(p){ await dropFinanceTx(p.transaction_id); await dropFinanceTx(p.tx_bayar_id); }
+  await sb.from('pinjaman').delete().eq('id',id); pinjamanCache=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; ledgerCache=null; render(); }
 function bindHutangModule(){
   if(pinjamanForm){ document.getElementById('pjSave').onclick=savePinjaman; document.getElementById('pjCancel').onclick=()=>{ pinjamanForm=false; render(); }; return; }
   const a=document.getElementById('htAddPinjaman'); if(a) a.onclick=()=>{ pinjamanForm=true; render(); };
@@ -2315,7 +2402,7 @@ function bindHutangModule(){
 }
 
 // ===== Keuangan berbasis order/transactions: Arus Kas, Biaya Usaha, HPP, Penjualan =====
-const TX_JENIS_LABEL={dp:'DP buyer',pelunasan:'Pelunasan buyer',hpp:'HPP',biaya_usaha:'Biaya usaha',modal:'Setoran modal',bayar_hutang:'Bayar supplier',lain:'Lainnya'};
+const TX_JENIS_LABEL={dp:'DP buyer',pelunasan:'Pelunasan buyer',hpp:'HPP',biaya_usaha:'Biaya usaha',modal:'Modal',pinjaman:'Pinjaman',bayar_hutang:'Bayar supplier',lain:'Lainnya'};
 // Keterangan lengkap 1 baris kas: jenis · (buyer utk uang masuk) · kategori · catatan
 function txKet(t){
   const label=TX_JENIS_LABEL[t.jenis]||t.jenis;
@@ -2359,10 +2446,18 @@ async function loadLedger(){
     // Setoran modal (owner + investor) dari menu Modal → tampil sebagai UANG MASUK di Arus Kas,
     // sehingga saldo awal dimulai dari modal. (Sumber tunggal: tabel modal_setoran; tak bisa diedit dari sini.)
     try{
-      const { data:ms }=await sb.from('modal_setoran').select('id,tanggal,jumlah,nama,catatan');
-      (ms||[]).forEach(m=>{ const neg=Number(m.jumlah)<0; rows.push({ id:'modal_'+m.id, tanggal:m.tanggal, arah:neg?'keluar':'masuk', jenis:'modal', jumlah:Math.abs(Number(m.jumlah)||0),
+      // Setoran/penarikan BARU sudah punya baris kas sendiri; yang disuntik di sini hanya data LAMA (transaction_id kosong) supaya tidak dobel.
+      const { data:ms }=await sb.from('modal_setoran').select('id,tanggal,jumlah,nama,catatan,transaction_id');
+      (ms||[]).filter(m=>!m.transaction_id).forEach(m=>{ const neg=Number(m.jumlah)<0; rows.push({ id:'modal_'+m.id, tanggal:m.tanggal, arah:neg?'keluar':'masuk', jenis:'modal', jumlah:Math.abs(Number(m.jumlah)||0),
         kategori:neg?'Penarikan modal':'Setoran modal', catatan:(neg?('Tarik modal '+(m.nama||'')):(m.nama?('Modal '+m.nama):'Setoran modal'))+(m.catatan?(' · '+m.catatan):''),
         order_id:null, order_no:null, _ro:true }); });
+      // Baris kas milik modul lain (modal/pinjaman/aset) ditandai → tak bisa diedit/dihapus dari Arus Kas,
+      // supaya catatan sumbernya tidak jadi yatim. Hapusnya lewat menu asalnya.
+      const own={}; (ms||[]).forEach(m=>{ if(m.transaction_id) own[m.transaction_id]='Setoran/penarikan modal'; });
+      const [pjR,asR]=await Promise.all([ sb.from('pinjaman').select('transaction_id,tx_bayar_id'), sb.from('aset_tetap').select('transaction_id') ]);
+      (pjR.data||[]).forEach(p=>{ if(p.transaction_id) own[p.transaction_id]='Pinjaman'; if(p.tx_bayar_id) own[p.tx_bayar_id]='Pinjaman'; });
+      (asR.data||[]).forEach(a=>{ if(a.transaction_id) own[a.transaction_id]='Pembelian aset'; });
+      rows.forEach(r=>{ if(own[r.id]) r._owned=own[r.id]; });
     }catch(e){}
     ledgerCache=rows;
   }catch(e){ ledgerCache=ledgerCache||[]; }
@@ -2413,9 +2508,9 @@ function viewKasModule(){
     const keluar=t.arah==='keluar'?(Number(t.jumlah)||0):0;
     masukT+=masuk; keluarT+=keluar;
     const ket=txKet(t);
-    const editable=canWr && !t._ro && ['biaya_usaha','modal','lain'].includes(t.jenis); // Edit form hanya utk transaksi manual
+    const editable=canWr && !t._ro && !t._owned && ['biaya_usaha','modal','lain'].includes(t.jenis); // Edit form hanya utk transaksi manual
     // Boleh hapus: biaya usaha, modal manual, lain, bayar supplier. TIDAK boleh hapus pembayaran buyer (dp/pelunasan) — kelola di kartu order/Penjualan biar tak salah hapus.
-    const deletable=canWr && !t._ro && t.jenis!=='dp' && t.jenis!=='pelunasan';
+    const deletable=canWr && !t._ro && !t._owned && t.jenis!=='dp' && t.jenis!=='pelunasan';
     return `<tr>
       <td style="white-space:nowrap">${t.tanggal?fmtLong(t.tanggal):'-'}</td>
       <td>${esc(ket)}</td>
@@ -2521,9 +2616,21 @@ async function saveKas(){
   if(error){ if(err) err.textContent='Gagal simpan: '+error.message; btn.disabled=false; btn.textContent='Simpan transaksi'; return; }
   ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; kasForm=false; kasEditId=null; render();
 }
-async function delKas(id){ if(!confirm('Hapus transaksi kas ini?')) return; const r=await deleteTxSafe(id); if(r&&r.error){ alert('Gagal hapus: '+r.error+'\n(Pastikan login owner/keuangan.)'); return; } ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; billsCache=null; render(); }
+async function delKas(id){ if(!confirm('Hapus transaksi kas ini?')) return; const r=await deleteTxSafe(id); if(r&&r.error){ alert(/tidak bisa dihapus/.test(r.error)?r.error:('Gagal hapus: '+r.error+'\n(Pastikan login owner/keuangan.)')); return; } ledgerCache=null; orderFinance=null; finReport=null; dashData=null; hppCache=null; vsData=null; txData=null; billsCache=null; render(); }
 // Hapus 1 transaksi dengan aman: ikut hapus pembayaran tagihan yang menaut + segarkan status tagihan/PO.
 async function deleteTxSafe(id){
+  // Palang pengaman: baris kas yang dimiliki modul lain tak boleh dihapus sepihak dari Arus Kas.
+  const owned=[['modal_setoran','transaction_id','Setoran/penarikan modal','menu Modal'],
+               ['pinjaman','transaction_id','Penerimaan pinjaman','menu Hutang'],
+               ['pinjaman','tx_bayar_id','Pelunasan pinjaman','menu Hutang (klik "Tandai belum")'],
+               ['aset_tetap','transaction_id','Pembelian aset','menu Aset']];
+  for(const o of owned){
+    try{ const { data }=await sb.from(o[0]).select('id').eq(o[1],id).limit(1);
+      if(data&&data.length) return {error:o[2]+' tidak bisa dihapus dari Arus Kas. Hapus dari '+o[3]+' — uangnya ikut terhapus otomatis.'};
+    }catch(e){}
+  }
+  // Bagi hasil: menghapus kasnya = membatalkan status "dibayar" (catatan bagi hasilnya tetap ada).
+  try{ await sb.from('bagi_hasil').update({transaction_id:null}).eq('transaction_id',id); }catch(e){}
   const { data:bp }=await sb.from('bill_payments').select('id,bill_id').eq('transaction_id',id);
   for(const p of (bp||[])){ await sb.from('bill_payments').delete().eq('id',p.id); await refreshBillStatus(p.bill_id); }
   const { error }=await sb.from('transactions').delete().eq('id',id);
@@ -2957,7 +3064,7 @@ async function savePpn(){
 async function delPpn(id){
   if(!confirm('Hapus setoran PPN ini?')) return;
   const r=await deleteTxSafe(id);
-  if(r&&r.error){ alert('Gagal hapus: '+r.error+'\n(Pastikan login owner/keuangan.)'); return; }
+  if(r&&r.error){ alert(/tidak bisa dihapus/.test(r.error)?r.error:('Gagal hapus: '+r.error+'\n(Pastikan login owner/keuangan.)')); return; }
   ledgerCache=null; finReport=null; dashData=null; vsData=null; txData=null; render();
 }
 function bindPpnModule(){
@@ -4063,7 +4170,7 @@ async function saveBill(){
   const no=document.getElementById('billNo').value.trim();
   const items=collectItems();
   const vatOn=poVatOn()!==false;
-  const nilai=items.length?(vatOn?computeItemTotals(items).total:itemsTotal(items)):(Number(document.getElementById('billNilai').value)||0);
+  const nilai=items.length?(vatOn?computeItemTotals(items).total:itemsTotal(items)+ongkirTotal(items)):(Number(document.getElementById('billNilai').value)||0);
   const terima=document.getElementById('billTerima').value||today();
   const tempo=document.getElementById('billTempo').value||null;
   const btn=document.getElementById('billSave'); btn.disabled=true; btn.textContent='Menyimpan…';
@@ -4312,7 +4419,7 @@ async function saveEditBill(){
   const no=document.getElementById('billNo').value.trim();
   const items=collectItems();
   const vatOn=poVatOn()!==false;
-  const nilai=items.length?(vatOn?computeItemTotals(items).total:itemsTotal(items)):(Number(document.getElementById('billNilai').value)||0);
+  const nilai=items.length?(vatOn?computeItemTotals(items).total:itemsTotal(items)+ongkirTotal(items)):(Number(document.getElementById('billNilai').value)||0);
   const terima=document.getElementById('billTerima').value||today();
   const tempo=document.getElementById('billTempo').value||null;
   if(!supplier_id){ err.textContent='Pilih supplier.'; return; }
@@ -4340,10 +4447,14 @@ async function loadShipments(){
     const bmap={}; (buyersCache||[]).forEach(b=>bmap[b.id]=b.nama);
     ordersCache=(os||[]).map(o=>({...o, buyer_name:bmap[o.buyer_id]||'—'}));
   }
-  const { data:ss }=await sb.from('shipments')
-    .select('id,no_kirim,order_id,buyer_id,jenis,ekspedisi,no_resi,tanggal_kirim,tanggal_terima,status,catatan,buyers(nama,alamat,kontak),orders(no_order,po_masuk_no),shipment_items(id,nama_item,qty,jumlah,netto,keterangan,supplier_id)')
+  // Coba dengan kolom ship_* (per-pengiriman). Kalau migrasi 16 belum dijalankan (kolom belum ada), ulangi tanpa kolom itu.
+  const shipSel=(withShip)=>sb.from('shipments')
+    .select('id,no_kirim,order_id,buyer_id,jenis,ekspedisi,no_resi,tanggal_kirim,tanggal_terima,status,catatan,'+(withShip?'ship_kontak,ship_alamat,':'')+'buyers(nama,alamat,kontak),orders(no_order,po_masuk_no),shipment_items(id,nama_item,qty,jumlah,netto,keterangan,supplier_id)')
     .order('created_at',{ascending:false});
-  shipCache=(ss||[]).map(s=>({...s, buyer_name:s.buyers?s.buyers.nama:'—', buyer_alamat:s.buyers?s.buyers.alamat:'', buyer_kontak:s.buyers?s.buyers.kontak:'', order_no:s.orders?s.orders.no_order:null, order_po_masuk:s.orders?s.orders.po_masuk_no:null}));
+  let { data:ss, error:se }=await shipSel(true);
+  if(se){ const r=await shipSel(false); ss=r.data; }
+  // Alamat/kontak SHIP TO diambil dari record pengiriman (ship_*) bila ada; kalau kosong, jatuh ke alamat master buyer. Tidak pernah menimpa master.
+  shipCache=(ss||[]).map(s=>({...s, buyer_name:s.buyers?s.buyers.nama:'—', buyer_alamat:(s.ship_alamat!=null&&s.ship_alamat!=='')?s.ship_alamat:(s.buyers?s.buyers.alamat:''), buyer_kontak:(s.ship_kontak!=null&&s.ship_kontak!=='')?s.ship_kontak:(s.buyers?s.buyers.kontak:''), order_no:s.orders?s.orders.no_order:null, order_po_masuk:s.orders?s.orders.po_masuk_no:null}));
   shipLoading=false;
   render();
 }
@@ -4413,7 +4524,7 @@ function shipForm(s){
       <div><label class="o-field">Kontak penerima</label><input class="o-input" id="shKontak" value="${escAttr(s.buyer_kontak||'')}" placeholder="mis. Pak Budi 0812…"></div>
       <div><label class="o-field">Alamat penerima (SHIP TO)</label><input class="o-input" id="shAlamat" value="${escAttr(s.buyer_alamat||'')}" placeholder="alamat kirim buyer"></div>
     </div>
-    <p style="font-size:11px;color:var(--ink-soft);margin:2px 0 8px">Otomatis terisi dari data buyer saat dipilih; kalau diubah, tersimpan untuk pengiriman buyer ini berikutnya.</p>
+    <p style="font-size:11px;color:var(--ink-soft);margin:2px 0 8px">Otomatis terisi dari data buyer saat dipilih. Kalau diubah, hanya berlaku untuk pengiriman ini — alamat master buyer tidak ikut berubah.</p>
     <div class="o-grid" style="grid-template-columns:1fr 1fr;margin-bottom:0">
       <div><label class="o-field">No surat jalan / kirim</label><input class="o-input" id="shNo" value="${escAttr(s.no_kirim||('SJ-'+seq))}"></div>
       <div><label class="o-field">Jenis kiriman</label><select class="o-input" id="shJenis">${SHIP_JENIS.map(j=>`<option value="${j[0]}" ${j[0]===(s.jenis||'barang')?'selected':''}>${j[1]}</option>`).join('')}</select></div>
@@ -4502,7 +4613,7 @@ async function openShipmentDO(shipId){
     </div>
     <p class="ed-hint no-print" style="padding:0 40px;margin:8px 0 -6px">Klik teks bergaris kuning (SHIP TO, PO Reference, Ship Via, No. Resi, catatan) untuk mengubahnya sebelum cetak.</p>
     ${addrPickerHTML('doAddrSel', aopts, 'Kirim ke (pilih gudang):')}
-    <div id="printArea"><div class="inv">
+    <div id="printArea"><div class="inv inv-do">
       <div class="inv-head">
         <div class="inv-brand">${invLogo()}<div class="txt"><div class="b">${esc(se.brand)||'TROPICA FARM'}</div><div class="l">${esc(se.legal)}</div><div class="a">${esc(se.alamat)}</div></div></div>
       </div>
@@ -4528,27 +4639,12 @@ async function openShipmentDO(shipId){
       </table>
       <div class="inv-sec-h">CATATAN</div>
       <div class="inv-notes"><div class="ed-block" contenteditable style="margin-top:8px">Kondisi dan jumlah barang sewaktu di muat dalam keadaan baik dan utuh sesuai yang tercantum pada Nota. Kerusakan atau kehilangan sebelum sampai ke tempat tujuan menjadi tanggung jawab pihak pengangkutan.${s.catatan?` ${esc(s.catatan)}`:''}</div></div>
-      <div style="margin-top:30px;font-size:12.5px;color:var(--ink)">Gudang ${esc(se.legal)||'PT Global Tropica Farmindo'}, ${warehouseDate}</div>
-      <table style="width:100%;margin-top:10px;border-collapse:collapse;text-align:center;font-size:12px">
-        <tr>
-          <td style="width:25%;padding:6px 4px;color:var(--ink-soft)">Prepared By</td>
-          <td style="width:25%;padding:6px 4px;color:var(--ink-soft)">Approved</td>
-          <td style="width:25%;padding:6px 4px;color:var(--ink-soft)">Shipped By</td>
-          <td style="width:25%;padding:6px 4px;color:var(--ink-soft)">Received By</td>
-        </tr>
-        <tr>
-          <td style="height:76px"></td><td></td><td></td><td></td>
-        </tr>
-        <tr>
-          <td style="padding:4px;border-top:1px solid var(--paper-line)">(____________)</td>
-          <td style="padding:4px;border-top:1px solid var(--paper-line)">(____________)</td>
-          <td style="padding:4px;border-top:1px solid var(--paper-line)">(____________)</td>
-          <td style="padding:4px;border-top:1px solid var(--paper-line)">(____________)</td>
-        </tr>
-        <tr style="color:var(--ink-soft)">
-          <td style="padding:2px 4px">Date</td><td style="padding:2px 4px">Date</td><td style="padding:2px 4px">Date</td><td style="padding:2px 4px">Date</td>
-        </tr>
-      </table>
+      <div class="inv-do-foot">
+        <div style="margin-top:30px;font-size:12.5px;color:var(--ink)">Gudang ${esc(se.legal)||'PT Global Tropica Farmindo'}, ${warehouseDate}</div>
+        <div style="display:flex;gap:22px;margin-top:24px;text-align:center;font-size:12px">
+          ${['Prepared By','Approved','Shipped By','Received By'].map(l=>`<div style="flex:1"><div style="font-weight:700;color:#1f1f1f">${l}</div><div style="height:88px"></div><div style="border-top:1px solid #222"></div></div>`).join('')}
+        </div>
+      </div>
     </div></div>
   </div></div>`;
   document.body.appendChild(ov);
@@ -4591,19 +4687,20 @@ async function saveShipment(){
   } else if(bsel){ buyer_id=bsel; }
   if(order_id && !buyer_id){ const o=(ordersCache||[]).find(x=>x.id===order_id); if(o) buyer_id=o.buyer_id||null; }
   if(!buyer_id && !order_id){ if(err) err.textContent='Pilih buyer atau order dulu.'; reset(); return; }
-  // simpan alamat/kontak SHIP TO ke data buyer supaya tak perlu ketik ulang berikutnya
-  if(buyer_id && (shipAlamat||shipKontak)){
-    await sb.from('buyers').update({ alamat:shipAlamat||null, kontak:shipKontak||null }).eq('id',buyer_id);
-    const bc=(buyersCache||[]).find(x=>x.id===buyer_id); if(bc){ bc.alamat=shipAlamat||null; bc.kontak=shipKontak||null; }
-  }
-  const header={ no_kirim:no, order_id, buyer_id, jenis, ekspedisi:eksp||null, no_resi:resi||null, tanggal_kirim:tgl, tanggal_terima:terima, status, catatan:catatan||null };
+  // Alamat/kontak SHIP TO disimpan di record pengiriman ini saja (ship_*), TIDAK menimpa data master buyer.
+  const header={ no_kirim:no, order_id, buyer_id, jenis, ekspedisi:eksp||null, no_resi:resi||null, tanggal_kirim:tgl, tanggal_terima:terima, status, catatan:catatan||null, ship_kontak:shipKontak||null, ship_alamat:shipAlamat||null };
+  // Kalau migrasi 16 belum jalan (kolom ship_* belum ada), simpan tanpa kolom itu supaya tetap bisa menyimpan.
+  const stripShip=(h)=>{ const c={...h}; delete c.ship_kontak; delete c.ship_alamat; return c; };
+  const isShipColErr=(e)=>e && /ship_(kontak|alamat)/.test((e.message||'')+(e.details||''));
   let shipmentId=editShipId;
   if(editShipId){
-    const { error:eu }=await sb.from('shipments').update(header).eq('id',editShipId);
+    let { error:eu }=await sb.from('shipments').update(header).eq('id',editShipId);
+    if(isShipColErr(eu)){ const r=await sb.from('shipments').update(stripShip(header)).eq('id',editShipId); eu=r.error; }
     if(eu){ if(err) err.textContent='Gagal simpan: '+eu.message; reset(); return; }
     await sb.from('shipment_items').delete().eq('shipment_id',editShipId);
   } else {
-    const { data, error:ei }=await sb.from('shipments').insert(header).select('id').single();
+    let { data, error:ei }=await sb.from('shipments').insert(header).select('id').single();
+    if(isShipColErr(ei)){ const r=await sb.from('shipments').insert(stripShip(header)).select('id').single(); data=r.data; ei=r.error; }
     if(ei){ if(err) err.textContent='Gagal simpan: '+ei.message; reset(); return; }
     shipmentId=data.id;
   }
@@ -5736,11 +5833,12 @@ function renderOverlay(){
     <div class="doc-wrap">
       <div class="doc-bar no-print">
         <button class="edit" data-edit-prof="1">Edit info penjual/pembeli</button>
+        <button class="edit" data-po-ttd="1">${s.ttd?'Ganti tanda tangan':'Tambah tanda tangan'}</button>
         <button class="print" data-print="1">Print / Simpan PDF</button>
         <button class="close" data-close-doc="1">Tutup</button>
       </div>
       <div id="printArea">
-        <div class="inv">
+        <div class="inv inv-sale">
           <div class="inv-head">
             <div class="inv-brand">
               ${invLogo()}
@@ -5774,13 +5872,13 @@ function renderOverlay(){
           </div>
 
           <table class="inv-tbl">
-            <tr><th style="width:38px;">No.</th><th>Description</th><th style="width:130px;">Pack Size</th><th style="width:64px;">Qty</th><th style="width:104px;">Unit Price (Rp)</th><th style="width:140px;">Total (Rp)</th></tr>
+            <tr><th style="width:34px;">No.</th><th>Description</th><th style="width:92px;">Pack Size</th><th style="width:74px;">Qty</th><th style="width:106px;">Unit Price (Rp)</th><th style="width:136px;">Total (Rp)</th></tr>
             ${itemRows||''}
             ${blankRows}
-            <tr class="sum"><td colspan="5" class="lbl">Sub Total</td><td class="r">${mcell(c.subtotalBarang)}</td></tr>
-            <tr class="sum"><td colspan="5" class="lbl">Tax (11%)</td><td class="r">${mcell(c.ppn)}</td></tr>
-            <tr class="sum"><td colspan="5" class="lbl">Shipping</td><td class="r">${mcell(c.ongkir)}</td></tr>
-            <tr class="grand"><td colspan="5" class="lbl">TOTAL</td><td class="r">${mcell(c.totalTagihan)}</td></tr>
+            <tr class="sum"><td></td><td></td><td></td><td></td><td class="lbl">Sub Total</td><td class="r">${mcell(c.subtotalBarang)}</td></tr>
+            <tr class="sum"><td></td><td></td><td></td><td></td><td class="lbl">Tax (11%)</td><td class="r">${mcell(c.ppn)}</td></tr>
+            <tr class="sum"><td></td><td></td><td></td><td></td><td class="lbl">Shipping</td><td class="r">${mcell(c.ongkir)}</td></tr>
+            <tr class="grand"><td></td><td></td><td></td><td></td><td class="lbl">TOTAL</td><td class="r">${mcell(c.totalTagihan)}</td></tr>
           </table>
 
           <div class="inv-due"><span>AMOUNT DUE NOW — ${isPI?`${o.dpPct||0}% DOWN PAYMENT`:`${100-(o.dpPct||0)}% FINAL PAYMENT`}</span>${mcell(isPI?dpNow:remaining)}</div>
@@ -5788,7 +5886,7 @@ function renderOverlay(){
             ? `<div class="inv-note-line">Due max. ${o.tempoDpHari!=null?o.tempoDpHari:3} days after PI date. Remaining Rp ${remaining.toLocaleString('id-ID')} (Final Payment) will be billed via a separate Invoice after the goods are shipped.</div>`
             : `<div class="inv-breakdown"><span>Total Order Value</span><span>Rp ${Math.round(c.totalTagihan).toLocaleString('id-ID')}</span></div>
           <div class="inv-breakdown"><span>Down Payment ${o.dpPct||0}% already paid (PI ${esc(o.noPI)||'-'})</span><span>— Rp ${dpNow.toLocaleString('id-ID')}</span></div>
-          <div class="inv-note-line">Due max. ${o.tempoHari||7} days after the goods are received (${fmtLong(o.tglKirim)}).</div>`}
+          <div class="inv-note-line">Due max. ${o.tempoHari||7} days after the goods are received (${fmtLong(addDays(docDate, o.tempoHari||7))}).</div>`}
 
           <div class="inv-sec-h">PAYMENT INSTRUCTIONS</div>
           <table class="inv-pay">
@@ -5803,7 +5901,7 @@ function renderOverlay(){
           <div class="inv-sign">
             <div class="city">${esc(s.kota)||'Purwakarta'}, ${fmtLong(docDate)}</div>
             <div class="co">${esc(s.legal)||esc(s.brand)}</div>
-            <div class="sp"></div>
+            ${s.ttd?`<img class="inv-ttd" src="${s.ttd}" alt="Tanda tangan">`:`<div class="sp"></div>`}
             <div>(__________________________)</div>
             <div class="nm">${esc(s.signer)||''}</div>
           </div>
@@ -5815,6 +5913,8 @@ function renderOverlay(){
 
   mount.querySelector('[data-close-doc]').onclick=()=>{ delete editing.doc; delete editing.docEdit; renderOverlay(); };
   mount.querySelector('[data-print]').onclick=()=>window.print();
+  const ovEl=mount.querySelector('.overlay');
+  const ttdBtn=mount.querySelector('[data-po-ttd]'); if(ttdBtn) ttdBtn.onclick=()=>openSignaturePad(url=>applyTtdToOverlay(ovEl,url));
   mount.querySelector('[data-edit-prof]').onclick=()=>{ editing.docEdit=true; renderOverlay(); };
   const cp=mount.querySelector('[data-cancel-prof]'); if(cp) cp.onclick=()=>{ delete editing.docEdit; renderOverlay(); };
   const sp=mount.querySelector('[data-save-prof]'); if(sp) sp.onclick=async()=>{
@@ -6065,6 +6165,35 @@ async function boot(){
   if(session){ await showApp(session); } else { showLogin(); }
   sb.auth.onAuthStateChange((_e, sess)=>{ if(!sess) showLogin(); });
 }
+
+// ── Auto-refresh: tarik ulang data dari cloud saat jendela kembali aktif ──
+// Alasan: aplikasi tidak punya live-sync, jadi perubahan rekan baru terlihat setelah reload.
+// Ini me-refresh otomatis saat tab difokuskan, TAPI dilewati bila sedang mengisi form
+// (biar isian yang belum disimpan tidak hilang).
+function isEditingUI(){
+  if(document.querySelector('.overlay')) return true;                 // dokumen cetak (PI/Invoice/PO/DO) terbuka
+  const ae=document.activeElement;
+  if(ae && (/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) || ae.isContentEditable)) return true;
+  try{
+    if(typeof shipView!=='undefined' && (shipView==='new'||shipView==='edit')) return true;
+    if(typeof orderView!=='undefined' && (orderView==='new'||orderView==='edit'||orderView==='card')) return true;
+    if(typeof dataEditId!=='undefined' && dataEditId!=null) return true;
+    if(typeof editing!=='undefined' && editing && Object.keys(editing).length>0) return true;
+  }catch(e){}
+  return false;
+}
+function softRefresh(){
+  const app=document.querySelector('.app');
+  if(!app || app.style.display==='none') return;   // masih di layar login
+  if(isEditingUI()) return;                         // jangan ganggu form yang sedang diisi
+  // kosongkan cache baris (order/buyer/supplier/PO/tagihan/pengiriman) → dimuat ulang otomatis oleh render()
+  ordersCache=buyersCache=suppliersCache=poCache=billsCache=shipCache=null;
+  dashData=hppCache=finReport=orderFinance=vsData=txData=null; orderSummary={};
+  try{ render(); }catch(e){}
+}
+document.addEventListener('visibilitychange',()=>{ if(!document.hidden) softRefresh(); });
+window.addEventListener('focus', softRefresh);
+
 boot();
 </script>
 </body>
