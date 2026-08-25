@@ -9,30 +9,47 @@ description: Deploy the Tropica Farm app to the live site (tropicafarm.netlify.a
 `meirisay/tropica-apps` (remote `origin`, over **SSH**). **Every push to `main` auto-builds &
 deploys** — `netlify.toml` publishes ONLY `index.html`. There is **no manual drag-drop anymore.**
 
-Branches: active work lives on **`cadangan-17jul`**; **`main`** mirrors it and is the deploy branch.
+## Branches — read this before touching git
+
+**Work happens directly on `main`, and `main` is the deploy branch.** Commit there and push.
+
+`cadangan-17jul` is a **stale snapshot from July 2026, not a work branch.** As of 24 Aug 2026 the
+two have **diverged**: `main` is 23 commits ahead, and `cadangan-17jul` holds one commit `main`
+never got (`6ba4952`, a gitignore chore). **`git merge --ff-only` between them fails.**
+
+- Do **not** try to fast-forward or "mirror" `cadangan-17jul` as part of a deploy — it is not
+  required and it will fail.
+- Reconciling the two branches needs `git merge --no-ff` and is a **decision for the user**, not a
+  deploy step. Ask first; never do it silently.
 
 ## Steps
 
-1. **Commit pending changes** on `cadangan-17jul` first (see the `commit` skill). Working tree must be clean before merging.
-2. **Bump the version badge** so the deploy is verifiable. In `index.html`, edit the login line:
-   `Versi: Cetak vX.Y (tgl) — <ringkas>` → a new value (e.g. bump vX.Y and update the note). Commit it on `cadangan-17jul`.
-3. **Merge to main and push:**
+1. **Commit pending changes on `main`** (see the `commit` skill). Do not commit stray untracked
+   files — `git add` the specific files you changed. (`_dotest.html` in the working tree is the
+   user's scratch file; leave it alone.)
+2. **Bump the version badge** so the deploy is verifiable. In `index.html` there is exactly one
+   line like `Versi: v4.5` (around line 476, inside `<p class="login-sub">`). Bump the minor
+   number. Keep the format plain — just `Versi: vX.Y`, no date or note.
+3. **Run any SQL the change needs, BEFORE pushing.** Frontend deploys instantly, so a feature that
+   expects a new column will break the live site if the migration has not run yet. Migrations go
+   through the Supabase SQL Editor (see the rekonsiliasi memory for how to drive it). Also check
+   `transactions_jenis_check` if a new `jenis` value was introduced — the CHECK constraint must
+   list it or every insert fails.
+4. **Push:**
    ```bash
-   git checkout main
-   git merge cadangan-17jul            # fast-forward
    git push origin main                # ← this triggers Netlify auto-deploy
-   git checkout cadangan-17jul
-   git push origin cadangan-17jul
    ```
-4. **Netlify auto-deploys in ~1–2 minutes** (no drag-drop).
-5. **Verify** — poll until the live badge matches the new version (build takes ~1 min). Do NOT use a foreground `sleep`; run the poll in the background:
+5. **Netlify auto-deploys in ~1 minute** (no drag-drop).
+6. **Verify** — poll the live badge until it matches the new version. Do NOT use a foreground
+   `sleep`; the loop below is fine because it exits as soon as the version flips:
    ```bash
    for i in $(seq 1 12); do
      v=$(curl -s --max-time 15 https://tropicafarm.netlify.app | grep -o "Versi: [^<]*" | head -1)
      echo "$(date +%T) $v"; echo "$v" | grep -q "vX.Y" && { echo OK; break; }; sleep 20
    done
    ```
-   Confirm it shows the new version (optionally also grep a code marker of the new feature).
+   Then grep the served HTML for a marker of the new code (a new function name works well) to
+   confirm the real change shipped, not just the badge.
 
 ## Troubleshooting
 - **Site unchanged after ~3 min:** open Netlify dashboard → Deploys, check for a failed/queued build; confirm production branch = `main` and that the build command comes from `netlify.toml` (`mkdir -p _site && cp index.html _site/index.html`, publish `_site`).
